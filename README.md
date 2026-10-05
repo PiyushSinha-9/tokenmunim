@@ -8,7 +8,17 @@
   <img src="docs/screenshots/pane.png" width="560" alt="The TokenMunim pane docked in Claude Code">
 </p>
 
-A munim keeps the books of a traditional Indian business: every rupee in or out goes into the bahi khata. TokenMunim does the same for tokens.
+## What "munim" means
+
+A **munim** (मुनीम) is the bookkeeper of a traditional Indian shop or business. Every rupee that comes in or goes out, the munim writes down in the ledger, so the owner always knows where the money went. TokenMunim does the same job for an AI agent's tokens.
+
+The pane uses the munim's own words:
+
+| Word | What it means | In TokenMunim |
+|---|---|---|
+| **Munim** (मुनीम) | The bookkeeper who records every transaction | The mod itself |
+| **Bahi** (बही) | The ledger book the munim writes in | The live tape, and the full ledger file `bahi.md` |
+| **Khata** (खाता) | One account inside the bahi, kept for one customer or purpose | One account per task, with its own budget |
 
 ## What it does
 
