@@ -64,7 +64,6 @@ export const emptyBook = (): Book => ({
   streaks: {},
   burnPausedUntil: 0,
   passes: 0,
-  saved: 0,
 })
 
 // A book as older versions saved it. Before version 5 a task was a "khata",
@@ -72,6 +71,8 @@ export const emptyBook = (): Book => ({
 type LegacyTask = Omit<Task, 'tokens'> & { tokens?: number }
 type OlderBook = Partial<Omit<Book, 'v' | 'tasks' | 'entries' | 'trips'>> & {
   v?: number
+  // An estimate of money saved, dropped so that every number shown is a fact.
+  saved?: number
   tasks?: LegacyTask[]
   khatas?: LegacyTask[]
   entries?: (Omit<Entry, 'task'> & { task?: string; khata?: string })[]
@@ -86,7 +87,7 @@ type OlderBook = Partial<Omit<Book, 'v' | 'tasks' | 'entries' | 'trips'>> & {
 export const normalize = (book: OlderBook | Book | undefined | null): Book => {
   if (book && book.v === 6) return book as Book
   const src = (book ?? {}) as OlderBook
-  const { khatas: _oldTasks, ...current } = src
+  const { khatas: _oldTasks, saved: _oldEstimate, ...current } = src
   const base = { ...emptyBook(), ...current, v: 6 as const }
   const tasks = (src.tasks ?? src.khatas ?? []).map(t => {
     const counted: Task = { ...t, tokens: t.tokens ?? 0 }
@@ -539,10 +540,6 @@ export const record = (book: Book, entry: Omit<Entry, 'task'>, fp: string): Book
   if (streak) streaks[task.id] = streak
   else delete streaks[task.id]
 
-  // A blocked repeat is worth roughly one average call of this task.
-  const perCall = task.calls > 0 ? task.usd / task.calls : 0
-  const saved = outcome === 'blocked' ? b.saved + perCall : b.saved
-
   const counted = withTask(b, task.id, k => ({
     ...k,
     calls: outcome === 'blocked' ? k.calls : k.calls + 1,
@@ -550,7 +547,7 @@ export const record = (book: Book, entry: Omit<Entry, 'task'>, fp: string): Book
     blocked: outcome === 'blocked' ? k.blocked + 1 : k.blocked,
   }))
   const entries = [...counted.entries, { ...entry, task: task.id }].slice(-MAX_ENTRIES)
-  return { ...counted, entries, streaks, saved }
+  return { ...counted, entries, streaks }
 }
 
 export const sessionUsd = (book: Book): number => book.tasks.reduce((sum, k) => sum + k.usd, 0)
@@ -638,7 +635,7 @@ export const statement = (book: Book, limits: Limits, past: readonly SessionSumm
     lines.push('Nothing booked yet in this session.')
   } else {
     lines.push(
-      `**Spent** ${money(sessionUsd(book))} of ${money(limits.sessionBudgetUsd)}  ·  **Tokens** ${compactTokens(book.tokens)} (cache hit ${pct(cacheHit(book.mix))})  ·  **Saved (est.)** ${money(book.saved)}  ·  **Circuit trips** ${book.trips.length}`,
+      `**Spent** ${money(sessionUsd(book))} of ${money(limits.sessionBudgetUsd)}  ·  **Tokens** ${compactTokens(book.tokens)} (cache hit ${pct(cacheHit(book.mix))})  ·  **Calls stopped** ${book.entries.filter(e => e.outcome === 'blocked').length}  ·  **Circuit trips** ${book.trips.length}`,
       '',
       ...taskTable(book),
     )
@@ -673,7 +670,7 @@ export const ledgerMarkdown = (
     `| Token mix | input ${compactTokens(m.input)}, cache read ${compactTokens(m.cacheRead)}, cache write ${compactTokens(m.cacheWrite)}, output ${compactTokens(m.output)} |`,
     `| Cache hit | ${pct(cacheHit(m))} |`,
     ...limitLines(book, meta.now),
-    `| Saved by the circuit breaker (est.) | ${money(book.saved)} |`,
+    `| Calls stopped by the circuit breaker | ${book.entries.filter(e => e.outcome === 'blocked').length} |`,
     `| Tasks | ${book.tasks.length} |`,
     `| Agents | ${book.agents.length} |`,
     `| Tool calls | ${book.entries.filter(e => e.outcome !== 'blocked').length} |`,

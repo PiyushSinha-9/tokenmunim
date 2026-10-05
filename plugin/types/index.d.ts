@@ -90,7 +90,6 @@ export type Book = {
   burnPausedUntil: number
   // Calls the person let through a tripped circuit from the pane.
   passes: number
-  saved: number
 }
 
 export type Tab = 'overview' | 'tasks' | 'activity' | 'alerts' | 'agents'

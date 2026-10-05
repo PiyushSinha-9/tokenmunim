@@ -47,7 +47,7 @@ A dashboard that docks beside the transcript.
 
 | Tab | What it shows |
 |---|---|
-| **Overview** | Plan limits and runway, spend, cost and tokens per minute, the burn chart, the token mix, the latest alert, tasks and recent activity |
+| **Overview** | Plan limits and runway, spend, cost and tokens per minute, calls stopped, the burn chart, the token mix, tasks, recent activity and alerts |
 | **Tasks** | Every task with its spend, tokens, budget bar and calls. `›` shows that task's calls |
 | **Activity** | Every call, newest first, or only one task's after you drill in. `›` opens a call's details |
 | **Alerts** | Everything the circuit breaker stopped, and what was done about it |
@@ -104,6 +104,14 @@ Change them in `/plugin`, under TokenMunim's configuration.
 | Session budget | $20 | Every call is blocked once the session spends this much |
 | Loop limit | 3 | Identical failures before a retry is blocked |
 | Burn limit | $2 a minute | Measured over two minutes; pauses the agent once |
+
+## What it costs
+
+TokenMunim runs inside Claude Code, on your machine. It never calls a model itself, and nothing it records leaves your machine.
+
+* **No extra model calls.** Checking a call, recording it and drawing the pane all happen locally, in milliseconds, without using tokens.
+* **One tool call per task.** Starting a task is a tool call the agent makes, so it costs one small step. In sessions that load tools on demand, the first task also costs one lookup to load the tool.
+* **How to avoid even that.** Ask Claude to start each task in the same reply as its first command, so it adds no step of its own. Or skip tasks entirely: work then counts toward the general task, and every circuit except the per task budget still protects you.
 
 ## Try it
 

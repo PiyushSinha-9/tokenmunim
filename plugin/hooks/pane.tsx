@@ -212,20 +212,24 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
 
   // ---- header and tabs -----------------------------------------------------
 
+  // The header is one row, like an app's title bar: a gold logo tile, the
+  // wordmark in two tones, the tagline when there is room, status on the right.
   const elapsed = d.startedAt && d.startedAt > 0 ? `session ${span((now - d.startedAt) / 60_000)}` : ''
+  const TAGLINE = '  cost control for AI agents'
+  const statusWidth = 8 + (d.hasFile ? 1 + 8 : 0)
+  const showTagline = 3 + 11 + TAGLINE.length + 1 + statusWidth <= inner
   const header = (
-    <Box key="header" flexDirection="column">
-      <Box justifyContent="space-between">
-        <Text bold color={GOLD}>{inner >= 44 ? '◆ T O K E N M U N I M' : '◆ TOKENMUNIM'}</Text>
-        <Box>
-          {isLive ? pill('● LIVE', GREEN, GREEN_BG) : pill('○ IDLE', FAINT)}
-          {d.hasFile ? <Text> </Text> : null}
-          {d.hasFile ? link('open-ledger', 'ledger.md ↗', act.openLedger) : null}
-        </Box>
+    <Box key="header" justifyContent="space-between">
+      <Box>
+        <Text bold color={INK} backgroundColor={GOLD}>{' ◆ '}</Text>
+        <Text bold>{' Token'}</Text>
+        <Text bold color={GOLD}>Munim</Text>
+        {showTagline ? <Text color={FAINT}>{TAGLINE}</Text> : null}
       </Box>
-      <Box justifyContent="space-between">
-        <Text color={FAINT}>{cut('  cost control for AI agents', inner - elapsed.length - 1)}</Text>
-        {elapsed !== '' ? <Text color={FAINT}>{elapsed}</Text> : null}
+      <Box>
+        {isLive ? pill('● LIVE', GREEN, GREEN_BG) : pill('○ IDLE', FAINT)}
+        {d.hasFile ? <Text> </Text> : null}
+        {d.hasFile ? link('open-ledger', 'ledger ↗', act.openLedger) : null}
       </Box>
     </Box>
   )
@@ -266,7 +270,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     </Box>
   )
 
-  const footerLeft = inner >= 54 ? '/munim statement · ledger · tab · fold' : '/munim'
+  const footerLeft = `${elapsed !== '' ? `${elapsed} · ` : ''}/munim for commands`
   const footer = (gap: number) => (
     <Box key="footer" marginTop={gap} justifyContent="space-between">
       <Text color={FAINT}>{footerLeft}</Text>
@@ -328,7 +332,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     { key: 'spent', label: 'SPENT', value: money(spent), color: undefined as string | undefined, caption: `${Math.round((spent / limits.sessionBudgetUsd) * 100)}% of ${dollars(limits.sessionBudgetUsd)}`, spark: undefined as string | undefined, sparkColor: GOLD },
     { key: 'cost', label: 'COST/MIN', value: money(rate), color: rateColor, caption: `limit ${money(limit)}`, spark: liveSpark(burnSeries(b, now, 16, 45_000)), sparkColor: rate > limit ? RED : GOLD },
     { key: 'tokens', label: 'TOKENS/MIN', value: compactTokens(tokensPerMin), color: undefined, caption: `${compactTokens(b.tokens)} total`, spark: liveSpark(tokenSeries(b, now, 16, 45_000)), sparkColor: TEAL },
-    { key: 'saved', label: 'SAVED · EST', value: money(b.saved), color: GREEN as string | undefined, caption: `${blockedCount} blocked`, spark: undefined as string | undefined, sparkColor: GREEN },
+    { key: 'stopped', label: 'STOPPED', value: String(blockedCount), color: (blockedCount > 0 ? RED : undefined) as string | undefined, caption: 'calls blocked', spark: undefined as string | undefined, sparkColor: GREEN },
   ]
   const tileRows = [tiles.slice(0, perRow), tiles.slice(perRow)].filter(row => row.length > 0)
   const tilesBlock = (marginTop: number) => (
@@ -664,7 +668,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     const panels = () =>
       limitRows + tilesRows + (shut.has('burn') ? 1 : burnOpen) + (shut.has('mix') ? 1 : mixOpen) + (shut.has('alerts') ? 1 : 1 + alertRows) +
       (shut.has('tasks') ? 1 : tasksOpen(taskCount)) + (shut.has('activity') ? 1 : activityOpen(activityCount))
-    const chrome = 2 + 3 + 1 // header, tabs, footer
+    const chrome = 1 + 3 + 1 // header, tabs, footer
     const gaps = 8
     const fits = () => chrome + panels() + gaps <= R
     while (!fits() && taskCount > 5) taskCount -= 1

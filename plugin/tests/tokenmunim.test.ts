@@ -332,7 +332,7 @@ test('the overview draws the tasks, a halted task and the circuit card on every 
   await busySession($ as never, on)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect(await ui.find({ type: 'Text', text: /T O K E N M U N I M/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Munim$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /iron condor/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /halted/ })).toBeDefined()
     expect(await ui.find({ key: 'fold-mix' })).toBeDefined()
@@ -396,7 +396,7 @@ test('every tab draws at narrow, medium and wide widths on every surface', async
       const ui = await $.ui.mount({ ...PANE, surface, props: { ...(PANE.props as object), bodyColumns: width, scroll: { offset: 0, bodyRows: 40 } } as never })
       for (const tab of ['tasks', 'activity', 'alerts', 'agents', 'overview']) {
         await ui.press({ key: `tab-btn-${tab}` })
-        expect(await ui.find({ type: 'Text', text: /T O K E N M U N I M|TOKENMUNIM/ })).toBeDefined()
+        expect(await ui.find({ type: 'Text', text: /^Munim$/ })).toBeDefined()
       }
       await ui.unmount()
     }
@@ -545,5 +545,14 @@ test('a halted task counts once in the alerts badge, however many alerts it rais
   expect(denied(await $.tool.call({ tool: 'Read', file_path: 'c.csv' }))).toBe(true)
   const ui = await $.ui.mount(at('terminal', 66, 44))
   expect(await ui.find({ type: 'Text', text: /1 new/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('every number on screen is a fact: calls stopped, not money saved', async ($, on) => {
+  await crowdedSession($ as never, on)
+  const ui = await $.ui.mount(at('terminal', 66, 44))
+  expect(await ui.find({ type: 'Text', text: /^STOPPED$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /calls blocked/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /SAVED/ })).toBeUndefined()
   await ui.unmount()
 })
