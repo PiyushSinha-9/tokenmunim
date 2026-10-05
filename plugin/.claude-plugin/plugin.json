@@ -1,0 +1,48 @@
+{
+  "name": "tokenmunim",
+  "version": "0.3.0",
+  "description": "A munim for your AI agent: a khata per task, a live bahi of every step, and a circuit breaker for runaway spend.",
+  "author": {
+    "name": "Piyush Sinha",
+    "url": "https://github.com/PiyushSinha-9"
+  },
+  "homepage": "https://github.com/PiyushSinha-9/tokenmunim",
+  "repository": "https://github.com/PiyushSinha-9/tokenmunim",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "mod",
+    "ai-agents",
+    "cost",
+    "tokens",
+    "circuit-breaker",
+    "observability"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "khataBudgetUsd": {
+      "type": "number",
+      "title": "Budget per khata (USD)",
+      "description": "A khata that spends this much is halted. The general khata, which catches unassigned work, has no budget of its own.",
+      "default": 1
+    },
+    "sessionBudgetUsd": {
+      "type": "number",
+      "title": "Session budget (USD)",
+      "description": "Every tool call is blocked once the session has spent this much since TokenMunim started.",
+      "default": 20
+    },
+    "loopLimit": {
+      "type": "number",
+      "title": "Loop limit",
+      "description": "The same failing action is blocked after failing this many times in a row.",
+      "default": 3
+    },
+    "burnLimitUsdPerMin": {
+      "type": "number",
+      "title": "Burn limit (USD per minute)",
+      "description": "Spending faster than this over two minutes pauses the agent once with a warning.",
+      "default": 2
+    }
+  }
+}
