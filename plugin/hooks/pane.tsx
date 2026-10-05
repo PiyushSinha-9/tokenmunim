@@ -475,7 +475,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
           <Text> </Text>
           {hasBudget && <Text color={barColor}>{'━'.repeat(filled)}</Text>}
           {hasBudget && <Text color={TRACK}>{'━'.repeat(BAR - filled)}</Text>}
-          {hasBudget && <Text color={ratio >= 1 ? RED : MUTED}>{lpad(`${Math.round(ratio * 100)}%`, 5)}</Text>}
+          {hasBudget && <Text color={ratio >= 1 ? RED : MUTED}>{lpad(`${Math.min(999, Math.round(ratio * 100))}%`, 5)}</Text>}
           {!hasBudget && <Text color={FAINT}>{pad('no limit', BAR + 5)}</Text>}
           {showCalls && <Text color={MUTED}>{lpad(String(k.calls), 6)}</Text>}
           <Text> </Text>
