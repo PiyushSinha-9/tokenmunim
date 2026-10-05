@@ -1,7 +1,7 @@
 {
   "name": "tokenmunim",
-  "version": "0.5.0",
-  "description": "A munim for your AI agent: a khata per task, a live bahi of every step, and a circuit breaker for runaway spend.",
+  "version": "0.6.0",
+  "description": "Cost control for AI agents: a budget per task, a live ledger of every step, and a circuit breaker that stops loops, burn spikes and runaway spend.",
   "author": {
     "name": "Piyush Sinha",
     "url": "https://github.com/PiyushSinha-9"
@@ -13,17 +13,18 @@
     "claude-code",
     "mod",
     "ai-agents",
-    "cost",
+    "cost-control",
+    "budgets",
     "tokens",
     "circuit-breaker",
     "observability"
   ],
   "types": "./types/index.d.ts",
   "userConfig": {
-    "khataBudgetUsd": {
+    "taskBudgetUsd": {
       "type": "number",
-      "title": "Budget per khata (USD)",
-      "description": "A khata that spends this much is halted. The general khata, which catches unassigned work, has no budget of its own.",
+      "title": "Budget per task (USD)",
+      "description": "A task that spends this much is halted. The general task, which catches work outside any task, has no budget of its own.",
       "default": 1
     },
     "sessionBudgetUsd": {

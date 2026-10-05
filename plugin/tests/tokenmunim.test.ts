@@ -16,18 +16,19 @@ import {
   limitsFrom,
   nameAgents,
   normalize,
-  openKhata,
+  startTask,
   parseMarker,
   raiseBudget,
   record,
   runway,
   setLimits,
-  skipKhata,
+  skipTask,
   statement,
   summarize,
   tokenRate,
 } from '../hooks/ledger'
 import type { Usage } from '../hooks/ledger'
+import { migrateView } from '../hooks/pane'
 
 const limits = limitsFrom({})
 const usage = (input: number, cacheRead: number, cacheWrite: number, output: number): Usage => ({
@@ -75,9 +76,9 @@ test('blocks the same failing action after the loop limit, lets a new one throug
   expect(denied(await $.tool.call({ tool: 'Bash', command: 'python fix_symbols.py' }))).toBe(false)
 })
 
-test('halts a khata over its budget and lets the next khata run', async ($, on) => {
+test('halts a task over its budget and lets the next task run', async ($, on) => {
   const { clock, state } = world(on)
-  await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'strategy 6', budget_usd: 0.5 })
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'strategy 6', budget_usd: 0.5 })
   await $.tool.call({ tool: 'Read', file_path: 'a.csv' })
   state.usd = 0.6
   await clock.advance(600_000)
@@ -85,21 +86,21 @@ test('halts a khata over its budget and lets the next khata run', async ($, on) 
   expect(denied(over)).toBe(true)
   expect(JSON.stringify(over)).toContain('budget')
 
-  await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'strategy 7', budget_usd: 0.5 })
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'strategy 7', budget_usd: 0.5 })
   expect(denied(await $.tool.call({ tool: 'Read', file_path: 'c.csv' }))).toBe(false)
 })
 
-test('never blocks the tool loader, so a halted agent can reach open_khata', async ($, on) => {
+test('never blocks the tool loader, so a halted agent can reach start_task', async ($, on) => {
   const { clock, state } = world(on)
-  await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'tiny', budget_usd: 0.1 })
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'tiny', budget_usd: 0.1 })
   await $.tool.call({ tool: 'Read', file_path: 'a.csv' })
   state.usd = 0.5
   await clock.advance(600_000)
   expect(denied(await $.tool.call({ tool: 'Read', file_path: 'b.csv' }))).toBe(true)
-  expect(denied(await $.tool.call({ tool: 'ToolSearch', query: 'select:mcp__tokenmunim__open_khata' }))).toBe(false)
+  expect(denied(await $.tool.call({ tool: 'ToolSearch', query: 'select:mcp__tokenmunim__start_task' }))).toBe(false)
 })
 
-test('the general khata has no budget of its own', async ($, on) => {
+test('the general task has no budget of its own', async ($, on) => {
   const { clock, state } = world(on)
   await $.tool.call({ tool: 'Read', file_path: 'a.csv' })
   state.usd = 3
@@ -109,7 +110,7 @@ test('the general khata has no budget of its own', async ($, on) => {
 
 test('pauses once on a burn spike, then lets work continue', async ($, on) => {
   const { clock, state } = world(on)
-  await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'research', budget_usd: 50 })
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'research', budget_usd: 50 })
   await $.tool.call({ tool: 'Read', file_path: 'small.txt' })
   await clock.advance(30_000)
   state.usd = 2.5
@@ -126,17 +127,17 @@ test('pauses once on a burn spike, then lets work continue', async ($, on) => {
 
 test('a halted task cannot be reopened under its own name', async ($, on) => {
   const { clock, state } = world(on)
-  await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'ratio spread', budget_usd: 0.3 })
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'ratio spread', budget_usd: 0.3 })
   await $.tool.call({ tool: 'Read', file_path: 'a.py' })
   state.usd = 0.4
   await clock.advance(600_000)
   expect(denied(await $.tool.call({ tool: 'Edit', file_path: 'a.py' }))).toBe(true)
-  const again = await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'Ratio Spread', budget_usd: 0.3 })
+  const again = await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'Ratio Spread', budget_usd: 0.3 })
   expect(JSON.stringify(again)).toContain('stays halted')
   expect(denied(await $.tool.call({ tool: 'Edit', file_path: 'a.py' }))).toBe(true)
 })
 
-test('a marker opens a khata without running the shell', async ($, on) => {
+test('a marker opens a task without running the shell', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   on('session.usage', async () => ({ value: { startedAt: 0, rateLimits: [], cost: { usd: 0 } } as unknown as SessionUsage }))
@@ -145,7 +146,7 @@ test('a marker opens a khata without running the shell', async ($, on) => {
     ran += 1
     return { result: 'ok' }
   })
-  const r = await $.tool.call({ tool: 'Bash', command: 'munim:khata bull put spread 0.3' })
+  const r = await $.tool.call({ tool: 'Bash', command: 'munim:task bull put spread 0.3' })
   expect(JSON.stringify(r)).toContain('bull put spread')
   expect(ran).toBe(0)
 })
@@ -159,27 +160,27 @@ test('spreads a cost reading over the time it was spent in', () => {
   expect(Math.abs(burnRate(b, 600_000) - 0.3)).toBeLessThan(0.001)
 })
 
-test('a reply that carries a khata past its budget halts it before the next call', () => {
-  let b = openKhata(bookCost(emptyBook(), 0, 0), 'strategy 6', 0.1, 0)[0]
+test('a reply that carries a task past its budget halts it before the next call', () => {
+  let b = startTask(bookCost(emptyBook(), 0, 0), 'strategy 6', 0.1, 0)[0]
   b = haltIfOver(bookCost(b, 0.14, 60_000), 60_000)
-  expect(b.khatas[0]?.status).toBe('halted')
+  expect(b.tasks[0]?.status).toBe('halted')
   expect(b.trips[b.trips.length - 1]?.kind).toBe('budget')
   expect(check(b, 'Write:REPORT.md', limits, 61_000)[1]?.kind).toBe('halted')
 })
 
 test('raising the budget lifts a budget halt and marks the trip resolved', () => {
-  let b = openKhata(bookCost(emptyBook(), 0, 0), 'strategy 6', 0.1, 0)[0]
+  let b = startTask(bookCost(emptyBook(), 0, 0), 'strategy 6', 0.1, 0)[0]
   b = haltIfOver(bookCost(b, 0.14, 60_000), 60_000)
-  const id = b.khatas[0]?.id ?? ''
+  const id = b.tasks[0]?.id ?? ''
   b = raiseBudget(b, id, 0.1)
-  expect(b.khatas[0]?.status).toBe('open')
-  expect(b.khatas[0]?.budgetUsd).toBe(0.2)
+  expect(b.tasks[0]?.status).toBe('open')
+  expect(b.tasks[0]?.budgetUsd).toBe(0.2)
   expect(b.trips[b.trips.length - 1]?.resolved).toContain('raised')
   expect(check(b, 'Write:REPORT.md', limits, 61_000)[1]).toBe(null)
 })
 
 test('allow once lets exactly one call through a tripped circuit', () => {
-  let b = openKhata(bookCost(emptyBook(), 0, 0), 'fetch', 5, 0)[0]
+  let b = startTask(bookCost(emptyBook(), 0, 0), 'fetch', 5, 0)[0]
   for (let i = 0; i < 3; i++) b = record(b, { at: i, tool: 'Bash', summary: 'fetch', ms: 1, outcome: 'fail' }, 'Bash:fetch')
   expect(check(b, 'Bash:fetch', limits, 10)[1]?.kind).toBe('loop')
   b = allowOnce(b)
@@ -188,20 +189,20 @@ test('allow once lets exactly one call through a tripped circuit', () => {
   expect(after.passes).toBe(0)
 })
 
-test('skipping a task halts its khata so the agent moves on', () => {
-  let b = openKhata(emptyBook(), 'strategy 4', 1, 0)[0]
-  const id = b.khatas[0]?.id ?? ''
-  b = skipKhata(b, id)
-  expect(b.khatas[0]?.status).toBe('halted')
+test('skipping a task halts its task so the agent moves on', () => {
+  let b = startTask(emptyBook(), 'strategy 4', 1, 0)[0]
+  const id = b.tasks[0]?.id ?? ''
+  b = skipTask(b, id)
+  expect(b.tasks[0]?.status).toBe('halted')
   expect(check(b, 'Bash:x', limits, 10)[1]?.reason).toContain('skipped by you')
 })
 
-test('books tokens per request to the open khata and its loop', () => {
-  let b = openKhata(emptyBook(), 'strategy 1', 1, 0)[0]
+test('books tokens per request to the open task and its loop', () => {
+  let b = startTask(emptyBook(), 'strategy 1', 1, 0)[0]
   b = bookTokens(b, usage(1_000, 25_000, 2_000, 2_000), 30_000)
   b = bookTokens(b, usage(1_000, 25_000, 2_000, 2_000), 60_000, 'agent-7')
   expect(b.tokens).toBe(60_000)
-  expect(b.khatas[0]?.tokens).toBe(60_000)
+  expect(b.tasks[0]?.tokens).toBe(60_000)
   expect(b.agents.map(a => a.id)).toEqual(['main', 'agent-7'])
   expect(b.agents[1]?.tokens).toBe(30_000)
   // 60k tokens in the last two minutes is 30k a minute.
@@ -239,14 +240,14 @@ test('fingerprints fold timestamps so a retried loop is still one action', () =>
   expect(fingerprint('Bash', { command: 'ls a' })).not.toBe(fingerprint('Bash', { command: 'ls b' }))
 })
 
-test('the tape reads what a call was for, not its raw arguments', () => {
+test('the activity reads what a call was for, not its raw arguments', () => {
   expect(summarize('Bash', { command: 'S=/tmp/x; python3 run.py', description: 'Run the backtest' })).toBe('Run the backtest')
   expect(summarize('Read', { file_path: '/work/lab/data/nifty.csv' }, '/work/lab')).toBe('data/nifty.csv')
   expect(summarize('Read', { file_path: '/Users/me/a/b/c/d.ts' }, '/work', '/Users/me')).toBe('…/c/d.ts')
 })
 
-test('books cost to the open khata and writes a statement', () => {
-  let b = openKhata(bookCost(emptyBook(), 0, 0), 'migrate billing', 2, 0)[0]
+test('books cost to the open task and writes a statement', () => {
+  let b = startTask(bookCost(emptyBook(), 0, 0), 'migrate billing', 2, 0)[0]
   b = bookCost(b, 0.75, 10_000)
   b = record(b, { at: 10_000, tool: 'Bash', summary: 'npm test', ms: 900, outcome: 'ok' }, 'Bash:npm test')
   expect(check(b, 'Bash:npm test', limits, 300_000)[1]).toBe(null)
@@ -255,15 +256,42 @@ test('books cost to the open khata and writes a statement', () => {
   expect(text).toContain('$0.75')
 })
 
-test('an older book is brought up to date and its general khata un-halted', () => {
-  const old = { khatas: [{ id: 'general', name: 'general', status: 'halted', usd: 1.2, budgetUsd: 1, calls: 4, fails: 0, blocked: 1, openedAt: 0 }], entries: [], active: 'general', lastUsd: 1.2, samples: [], streaks: {}, burnPausedUntil: 0, saved: 0 }
-  const b = normalize(old as never)
-  expect(b.v).toBe(4)
+test('an older book is brought up to date and its general task un-halted', () => {
+  const v1 = { khatas: [{ id: 'general', name: 'general', status: 'halted', usd: 1.2, budgetUsd: 1, calls: 4, fails: 0, blocked: 1, openedAt: 0 }], entries: [], active: 'general', lastUsd: 1.2, samples: [], streaks: {}, burnPausedUntil: 0, saved: 0 }
+  const b = normalize(v1 as never)
+  expect(b.v).toBe(5)
   expect(b.trips).toEqual([])
   expect(b.agents).toEqual([])
   expect(b.mix.cacheRead).toBe(0)
-  expect(b.khatas[0]?.status).toBe('open')
-  expect(b.khatas[0]?.budgetUsd).toBe(0)
+  expect(b.tasks[0]?.status).toBe('open')
+  expect(b.tasks[0]?.budgetUsd).toBe(0)
+})
+
+test('a book from before plain words keeps its tasks, activity and trips', () => {
+  const v4 = {
+    v: 4,
+    khatas: [{ id: 'strategy-6-1', name: 'strategy 6', status: 'halted', usd: 0.14, tokens: 163_000, budgetUsd: 0.1, calls: 2, fails: 0, blocked: 1, openedAt: 0 }],
+    entries: [{ at: 1, khata: 'strategy-6-1', tool: 'Write', summary: 'REPORT.md', ms: 0, outcome: 'blocked', note: 'budget' }],
+    trips: [{ at: 1, kind: 'budget', khata: 'strategy 6', khataId: 'strategy-6-1', tool: 'Write', summary: 'REPORT.md', reason: 'over' }],
+    active: 'strategy-6-1', lastUsd: 0.14, samples: [], tokens: 163_000, tokenSamples: [], rateLimits: [], streaks: {}, burnPausedUntil: 0, saved: 0,
+  }
+  const b = normalize(v4 as never)
+  expect(b.v).toBe(5)
+  expect(b.tasks[0]?.name).toBe('strategy 6')
+  expect(b.entries[0]?.task).toBe('strategy-6-1')
+  expect(b.trips[0]?.task).toBe('strategy 6')
+  expect(b.trips[0]?.taskId).toBe('strategy-6-1')
+  expect(JSON.stringify(b)).not.toContain('khata')
+})
+
+test('a saved view with the old tab and section names opens on the new ones', () => {
+  const v = migrateView({ tab: 'khatas', folded: ['tape'], opened: ['khatas'], khata: 'strategy-6-1', entry: null })
+  expect(v.tab).toBe('tasks')
+  expect(v.folded).toEqual(['activity'])
+  expect(v.opened).toEqual(['tasks'])
+  expect(v.task).toBe('strategy-6-1')
+  expect(migrateView({ tab: 'trips' }).tab).toBe('alerts')
+  expect(migrateView(undefined).tab).toBe('overview')
 })
 
 test('the chart draws the limit as a line and colors bars over it', () => {
@@ -281,18 +309,18 @@ test('writes token counts the way a person reads them', () => {
   expect(compactTokens(1_240_000)).toBe('1.24M')
 })
 
-test('reads khata markers from a shell line', () => {
-  expect(parseMarker('munim:khata iron condor 0.4')).toEqual({ verb: 'khata', name: 'iron condor', budgetUsd: 0.4 })
-  expect(parseMarker("echo 'munim:khata short straddle'")).toEqual({ verb: 'khata', name: 'short straddle' })
-  expect(parseMarker('munim:close')).toEqual({ verb: 'close' })
-  expect(parseMarker('ls munim:khata')).toBe(null)
+test('reads task markers from a shell line', () => {
+  expect(parseMarker('munim:task iron condor 0.4')).toEqual({ verb: 'task', name: 'iron condor', budgetUsd: 0.4 })
+  expect(parseMarker("echo 'munim:task short straddle'")).toEqual({ verb: 'task', name: 'short straddle' })
+  expect(parseMarker('munim:end')).toEqual({ verb: 'end' })
+  expect(parseMarker('ls munim:task')).toBe(null)
 })
 
 // ---- the pane -----------------------------------------------------------------
 
 async function busySession($: Parameters<Parameters<typeof test>[1]>[0], on: On) {
   const { clock, state } = world(on)
-  await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'iron condor', budget_usd: 0.5 })
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'iron condor', budget_usd: 0.5 })
   await $.tool.call({ tool: 'Bash', command: 'python backtest.py', description: 'Backtest iron condor' })
   state.usd = 0.7
   await clock.advance(600_000)
@@ -300,7 +328,7 @@ async function busySession($: Parameters<Parameters<typeof test>[1]>[0], on: On)
   return { clock, state }
 }
 
-test('the overview draws the khatas, a halted khata and the circuit card on every surface', async ($, on) => {
+test('the overview draws the tasks, a halted task and the circuit card on every surface', async ($, on) => {
   await busySession($ as never, on)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -313,24 +341,24 @@ test('the overview draws the khatas, a halted khata and the circuit card on ever
   }
 })
 
-test('tabs switch the view, and a khata opens its own tape', async ($, on) => {
+test('tabs switch the view, and a task opens its own activity', async ($, on) => {
   await busySession($ as never, on)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    await ui.press({ key: 'tab-btn-tape' })
+    await ui.press({ key: 'tab-btn-activity' })
     expect(await ui.find({ type: 'Text', text: /Backtest iron condor/ })).toBeDefined()
-    await ui.press({ key: 'tab-btn-khatas' })
+    await ui.press({ key: 'tab-btn-tasks' })
     expect(await ui.find({ type: 'Text', text: /^total$/ })).toBeDefined()
     await ui.press({ key: 'drill-iron-condor-1' })
-    expect(await ui.find({ type: 'Text', text: /TAPE/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /khata/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /ACTIVITY/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /task/ })).toBeDefined()
     await ui.press({ key: 'clear-filter' })
     await ui.press({ key: 'tab-btn-overview' })
     await ui.unmount()
   }
 })
 
-test('the circuit card raises a budget, and the halted khata carries on', async ($, on) => {
+test('the circuit card raises a budget, and the halted task carries on', async ($, on) => {
   await busySession($ as never, on)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'trip-latest-raise-btn' })
@@ -359,7 +387,7 @@ test('every tab draws at narrow, medium and wide widths on every surface', async
   for (const width of [40, 52, 66, 96]) {
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ ...PANE, surface, props: { ...(PANE.props as object), bodyColumns: width, scroll: { offset: 0, bodyRows: 40 } } as never })
-      for (const tab of ['khatas', 'tape', 'trips', 'agents', 'overview']) {
+      for (const tab of ['tasks', 'activity', 'alerts', 'agents', 'overview']) {
         await ui.press({ key: `tab-btn-${tab}` })
         expect(await ui.find({ type: 'Text', text: /T O K E N M U N I M|TOKENMUNIM/ })).toBeDefined()
       }
@@ -370,16 +398,16 @@ test('every tab draws at narrow, medium and wide widths on every surface', async
 
 // ---- clicking through the pane, the way a person does ---------------------------
 
-// Eight khatas, a budget trip on the last one, and a tape long enough to trim.
+// Eight tasks, a budget trip on the last one, and a activity long enough to trim.
 async function crowdedSession($: Parameters<Parameters<typeof test>[1]>[0], on: On) {
   const { clock, state } = world(on)
   for (let i = 1; i <= 7; i++) {
-    await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: `strategy ${i}`, budget_usd: 5 })
+    await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: `strategy ${i}`, budget_usd: 5 })
     await $.tool.call({ tool: 'Bash', command: `python run.py ${i}`, description: `Backtest strategy ${i}` })
     state.usd += 0.02
     await clock.advance(5_000)
   }
-  await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'strategy 8', budget_usd: 0.05 })
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'strategy 8', budget_usd: 0.05 })
   await $.tool.call({ tool: 'Bash', command: 'python run.py 8', description: 'Backtest strategy 8' })
   state.usd += 0.2
   await clock.advance(5_000)
@@ -395,14 +423,14 @@ const at = (surface: 'terminal' | 'desktop', columns: number, rows: number) => (
 })
 
 // What each section shows only while it is open.
-const BODY: Record<string, RegExp> = { burn: /m ago$/, mix: /No replies booked yet|cache read/, khatas: /USED/, tape: /Backtest strategy 8/ }
+const BODY: Record<string, RegExp> = { burn: /m ago$/, mix: /No replies booked yet|cache read/, tasks: /USED/, activity: /Backtest strategy 8/ }
 
 test('every section opens and folds on the first press, even one the pane folded to fit', async ($, on) => {
   await crowdedSession($ as never, on)
   for (const surface of ['terminal', 'desktop'] as const) {
     for (const [columns, rows] of [[66, 30], [66, 38], [66, 60], [46, 34]] as const) {
       const ui = await $.ui.mount(at(surface, columns, rows))
-      for (const id of ['burn', 'mix', 'khatas', 'tape']) {
+      for (const id of ['burn', 'mix', 'tasks', 'activity']) {
         for (let press = 0; press < 2; press++) {
           const label = String((await ui.find({ key: `fold-${id}` }))?.props.label ?? '')
           const wasFolded = label.startsWith('▸')
@@ -421,38 +449,38 @@ test('every section opens and folds on the first press, even one the pane folded
 test('a section the person opened stays open when the pane is short of room', async ($, on) => {
   await crowdedSession($ as never, on)
   const ui = await $.ui.mount(at('terminal', 66, 30))
-  const tapeLabel = String((await ui.find({ key: 'fold-tape' }))?.props.label ?? '')
-  expect(tapeLabel.startsWith('▸')).toBe(true)
-  await ui.press({ key: 'fold-tape' })
-  expect(await ui.find({ type: 'Text', text: BODY.tape })).toBeDefined()
+  const activityLabel = String((await ui.find({ key: 'fold-activity' }))?.props.label ?? '')
+  expect(activityLabel.startsWith('▸')).toBe(true)
+  await ui.press({ key: 'fold-activity' })
+  expect(await ui.find({ type: 'Text', text: BODY.activity })).toBeDefined()
   await ui.unmount()
   // Drawn again, as after the next tool call: still open.
   const again = await $.ui.mount(at('terminal', 66, 30))
-  expect(await again.find({ type: 'Text', text: BODY.tape })).toBeDefined()
+  expect(await again.find({ type: 'Text', text: BODY.activity })).toBeDefined()
   await again.unmount()
 })
 
 test('each tab shows its own content on every surface', async ($, on) => {
   await crowdedSession($ as never, on)
-  const only: Record<string, RegExp> = { khatas: /^total$/, tape: /newest first/, agents: /tokens exact/, overview: /COST\/MIN/ }
+  const only: Record<string, RegExp> = { tasks: /^total$/, activity: /newest first/, agents: /tokens exact/, overview: /COST\/MIN/ }
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount(at(surface, 66, 44))
-    for (const tab of ['khatas', 'tape', 'trips', 'agents', 'overview']) {
+    for (const tab of ['tasks', 'activity', 'alerts', 'agents', 'overview']) {
       await ui.press({ key: `tab-btn-${tab}` })
       expect(await ui.find({ key: `tab-btn-${tab}` })).toBeUndefined()
       for (const [other, mark] of Object.entries(only)) {
         expect((await ui.find({ type: 'Text', text: mark })) !== undefined).toBe(other === tab)
       }
-      if (tab === 'trips') expect(await ui.find({ type: 'Text', text: /CIRCUIT/ })).toBeDefined()
+      if (tab === 'alerts') expect(await ui.find({ type: 'Text', text: /CIRCUIT/ })).toBeDefined()
     }
     await ui.unmount()
   }
 })
 
-test('a khata opens its own tape, and show all brings the rest back', async ($, on) => {
+test('a task opens its own activity, and show all brings the rest back', async ($, on) => {
   await crowdedSession($ as never, on)
   const ui = await $.ui.mount(at('terminal', 66, 44))
-  await ui.press({ key: 'tab-btn-khatas' })
+  await ui.press({ key: 'tab-btn-tasks' })
   await ui.press({ key: 'drill-strategy-3-3' })
   expect(await ui.find({ type: 'Text', text: /newest first/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Backtest strategy 3/ })).toBeDefined()
@@ -462,10 +490,10 @@ test('a khata opens its own tape, and show all brings the rest back', async ($, 
   await ui.unmount()
 })
 
-test('a call on the tape opens its details and closes again', async ($, on) => {
+test('a call on the activity opens its details and closes again', async ($, on) => {
   await crowdedSession($ as never, on)
   const ui = await $.ui.mount(at('terminal', 66, 44))
-  await ui.press({ key: 'tab-btn-tape' })
+  await ui.press({ key: 'tab-btn-activity' })
   expect(await ui.find({ type: 'Text', text: /blocked by the budget circuit/ })).toBeUndefined()
   await ui.press({ key: 'open-8' })
   expect(await ui.find({ type: 'Text', text: /blocked by the budget circuit/ })).toBeDefined()
@@ -475,9 +503,9 @@ test('a call on the tape opens its details and closes again', async ($, on) => {
   await ui.unmount()
 })
 
-test('skip task on a loop halts the khata and the agent is told to move on', async ($, on) => {
+test('skip task on a loop halts the task and the agent is told to move on', async ($, on) => {
   const { clock, state } = world(on)
-  await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'chain data', budget_usd: 5 })
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'chain data', budget_usd: 5 })
   state.failing = true
   for (let i = 0; i < 3; i++) {
     await $.tool.call({ tool: 'Bash', command: 'python fetch.py' })

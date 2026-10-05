@@ -2,44 +2,42 @@
 
 [![ci](https://github.com/PiyushSinha-9/tokenmunim/actions/workflows/ci.yml/badge.svg)](https://github.com/PiyushSinha-9/tokenmunim/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-E8B04B) ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.287%2B-D97757)
 
-**A munim for your AI agent.** TokenMunim is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that keeps a ledger of everything an agent does, books what it spends to the task it spent it on, and trips a circuit breaker when the agent starts wasting money.
+**Cost control for AI agents.** TokenMunim is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that gives every task its own budget, keeps a live ledger of every step your agent takes, and trips a circuit breaker the moment the agent starts wasting money.
 
 <p align="center">
   <img src="docs/screenshots/claude-code-window.png" alt="The TokenMunim pane docked beside a Claude Code session, transcript blurred">
 </p>
 
-## What "munim" means
+## Why
 
-A **munim** (मुनीम) is the bookkeeper of a traditional Indian shop or business. Every rupee that comes in or goes out, the munim writes down in the ledger, so the owner always knows where the money went. TokenMunim does the same job for an AI agent's tokens.
+Agents now run for hours with nobody watching. When one gets stuck it rarely crashes: it retries, rereads, rewrites, and keeps spending. Your bill shows the total, not which task spent it, and nothing stops the spending while it happens.
 
-The pane uses the munim's own words:
+TokenMunim answers three questions while the agent works, not after:
 
-| Word | What it means | In TokenMunim |
-|---|---|---|
-| **Munim** (मुनीम) | The bookkeeper who records every transaction | The mod itself |
-| **Bahi** (बही) | The ledger book the munim writes in | The live tape, and the full ledger file `bahi.md` |
-| **Khata** (खाता) | One account inside the bahi, kept for one customer or purpose | One account per task, with its own budget |
+1. **Where is the money going?** Cost and tokens for every task.
+2. **What did the agent actually do?** A complete, readable record of every call.
+3. **When should it stop?** Rules that block a call before it runs.
 
 ## What it does
 
-**Khatas.** Each task gets its own account, a khata, with an optional budget. The agent opens one with the `open_khata` tool when it starts a task, so an overnight run of twenty tasks becomes twenty lines of cost and tokens instead of one big number.
+**Budgets per task.** The agent starts a task with the `start_task` tool, and everything it does from then on is counted against that task: cost, tokens, calls and failures, with an optional budget. An overnight run of twenty tasks becomes twenty lines on a ledger instead of one big number.
 
-**Bahi.** Every tool call goes on a live tape: what it was for, how long it took, and whether it worked. The full ledger is written to `.tokenmunim/bahi-<session>.md` in your project, one click away from the pane (`bahi.md ↗`). The folder ignores itself in git.
+**A live ledger.** Every tool call is recorded as it happens: what it was for, how long it took, and whether it worked. The full ledger is written to `.tokenmunim/ledger-<session>.md` in your project, one click away from the pane. The folder ignores itself in git.
 
-**Circuit breaker.** TokenMunim stops a call before it runs when:
+**A circuit breaker.** TokenMunim stops a call before it runs when:
 
 | Circuit | Trips when | The agent is told |
 |---|---|---|
 | Loop | The same action fails 3 times in a row | Stop retrying, read the error, change the approach |
 | Burn | Spend over the last two minutes passes the rate limit | Pause and work leaner |
-| Budget | A khata spends more than its budget | Leave this task and move to the next one |
+| Budget | A task spends more than its budget | Leave this task and move to the next one |
 | Session | The session spends more than its budget | Stop and report |
 
-A trip blocks one call and says why, so the agent can recover. It never ends the session, and it never blocks the tools an agent needs to get itself out of a halt.
+A trip blocks one call and says why, so the agent can recover. It never ends the session, and it never blocks the tools an agent needs to get itself unstuck.
 
-**Agents.** Every reply is booked to the loop that made it, the main agent or a subagent, with its own tokens, cost, steps and cache hit rate. When a run fans out, you can see which subagent did the spending.
+**Per agent accounting.** Every reply is booked to the loop that made it, the main agent or a subagent, with its own tokens, cost, steps and cache hit rate. When a run fans out, you can see which subagent did the spending.
 
-**Limits runway.** How much of your 5 hour and weekly limits is left, and whether the last twenty minutes' pace makes it to the reset: `✓ lasts`, or `⚠ out in 42m` while there is still time to slow down.
+**Plan limits and runway.** How much of your 5 hour and weekly limits is left, and whether the last twenty minutes' pace lasts until the reset: `✓ lasts`, or `⚠ out in 42m` while there is still time to slow down.
 
 **Token mix.** Where the tokens went: cache reads, fresh input, cache writes and output, with the cache hit rate that decides what a long session really costs.
 
@@ -49,20 +47,20 @@ A dashboard that docks beside the transcript.
 
 | Tab | What it shows |
 |---|---|
-| **Overview** | Limits left with their runway, spend, cost and tokens per minute, the burn chart, the token mix, the latest circuit trip, khatas and the tape |
-| **Khatas** | Every khata with its spend, tokens, budget bar and calls. `›` opens its own tape |
-| **Tape** | Every call, newest first, filtered to one khata when you drill in. `›` opens a call's details |
-| **Trips** | Every circuit trip, and what was done about it |
+| **Overview** | Plan limits and runway, spend, cost and tokens per minute, the burn chart, the token mix, the latest alert, tasks and recent activity |
+| **Tasks** | Every task with its spend, tokens, budget bar and calls. `›` shows that task's calls |
+| **Activity** | Every call, newest first, or only one task's after you drill in. `›` opens a call's details |
+| **Alerts** | Everything the circuit breaker stopped, and what was done about it |
 | **Agents** | The main agent and each subagent, with their model, steps, tokens, cost and cache hit rate |
 
-* **Act on a trip from the pane.** The circuit card has buttons: `+$0.50 budget` gives a halted khata more room, `Allow once` lets the next call through, `Skip task` moves the agent on. Each one is recorded on the trip.
-* **Fold any section** by clicking its title, to a single summary line, and click again to open it. A section you open stays open: when room runs short the pane folds the others, never yours. From the keyboard: `/munim fold tape`, `/munim unfold burn`.
-* **Fits any width.** Columns drop out in a fixed order as the pane narrows, tabs shorten, and bars stretch or shrink, so nothing wraps or spills.
-* **Never floods.** Every list sits in a fixed frame: the overview folds and trims itself to the pane's height, and older rows live in `bahi.md`.
+* **Act on an alert from the pane.** The alert has buttons: `+$0.50 budget` gives a halted task more room, `Allow once` lets the next call through, `Skip task` moves the agent on. Each choice is recorded on the alert.
+* **Fold any section** by clicking its title, and click again to open it. A section you open stays open: when room runs short the pane folds the others, never yours. From the keyboard: `/munim fold activity`, `/munim unfold burn`.
+* **Fits any width.** Columns drop out in a fixed order as the pane narrows, tabs shorten, and charts stretch or shrink, so nothing wraps or spills.
+* **Never floods.** Every list sits in a fixed frame. The overview fits itself to the pane's height, and older rows live in the ledger file.
 
 <p align="center">
-  <img src="docs/screenshots/limits-and-burn.png" width="420" alt="Limits left, the KPI cards and the burn chart">
-  <img src="docs/screenshots/circuit-and-khatas.png" width="420" alt="A circuit trip and the khatas">
+  <img src="docs/screenshots/limits-and-burn.png" width="420" alt="Plan limits, the KPI tiles and the burn chart">
+  <img src="docs/screenshots/alerts-and-tasks.png" width="420" alt="An alert from the circuit breaker, and the tasks">
 </p>
 
 ## Install
@@ -74,26 +72,26 @@ claude plugin marketplace add PiyushSinha-9/tokenmunim
 claude plugin install tokenmunim@tokenmunim
 ```
 
-The installer may say the four settings aren't set yet. They all have defaults, so you can skip that. Open a session and run `/munim`. In a terminal 144 columns or wider the pane docks beside the transcript on its own.
+The installer may say the four settings aren't set yet. They all have defaults, so you can skip that. Open a session and run `/munim`. In a terminal 144 columns or wider, the pane docks beside the transcript on its own.
 
 ## Use it
 
-Ask for khatas in your prompt:
+Ask for tasks in your prompt:
 
-> Migrate all twelve services to the new config. Open a khata per service with a $0.50 budget.
+> Migrate all twelve services to the new config. Start a task per service with a $0.50 budget.
 
 | Command | What it does |
 |---|---|
 | `/munim` | Opens the pane |
 | `/munim statement` | Prints the session's statement |
-| `/munim bahi` | Writes the ledger file and opens it |
-| `/munim tab <name>` | Switches the pane to `overview`, `khatas`, `tape`, `trips` or `agents` |
-| `/munim fold <section>` | Folds `burn`, `mix`, `khatas` or `tape`; `/munim unfold <section>` opens it |
-| `/munim khata <name>` | Opens a khata by hand |
-| `/munim close` | Closes the open khata |
-| `/munim reset` | Clears this session's book |
+| `/munim ledger` | Writes the ledger file and opens it |
+| `/munim tab <name>` | Switches to `overview`, `tasks`, `activity`, `alerts` or `agents` |
+| `/munim fold <section>` | Folds `burn`, `mix`, `tasks` or `activity`; `/munim unfold <section>` opens it |
+| `/munim task <name>` | Starts a task by hand |
+| `/munim end` | Ends the current task |
+| `/munim reset` | Clears this session's ledger |
 
-Scripts and agents that can't see the tool can open a khata with a shell line, `munim:khata <name> <budget>`. TokenMunim answers it, and the shell never runs it.
+Scripts and agents that can't see the tool can start a task with a shell line, `munim:task <name> <budget>`, and end it with `munim:end`. TokenMunim answers these itself; the shell never runs them.
 
 ## Settings
 
@@ -101,7 +99,7 @@ Change them in `/plugin`, under TokenMunim's configuration.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Budget per khata | $1 | A khata that spends this much is halted |
+| Budget per task | $1 | A task that spends this much is halted |
 | Session budget | $20 | Every call is blocked once the session spends this much |
 | Loop limit | 3 | Identical failures before a retry is blocked |
 | Burn limit | $2 a minute | Measured over two minutes; pauses the agent once |
@@ -112,12 +110,16 @@ Change them in `/plugin`, under TokenMunim's configuration.
 
 ## How it works
 
-TokenMunim hooks five events: every tool call (check, run, record), every model reply (book its tokens and cost to the khata and the agent), the end of each turn (save the ledger), its slash command, and the pane's draw. The rules are pure functions over one immutable book, the pane is pure drawing over that book and its own view state, and both are tested without a live session, buttons and all. [docs/DESIGN.md](docs/DESIGN.md) covers the design, the trade-offs, and the bugs TokenMunim found in itself.
+TokenMunim hooks five events: every tool call (check, run, record), every model reply (book its tokens and cost to the task and the agent), the end of each turn (save the ledger), its slash command, and the pane's draw. The rules are pure functions over one immutable ledger, the pane is pure drawing over that ledger and its own view state, and both are tested without a live session, buttons and all. [docs/DESIGN.md](docs/DESIGN.md) covers the design, the trade-offs, and the bugs TokenMunim found in itself.
 
 ## Future plans
 
 * **Smarter loop detection.** Catch thrashing (many different edits while the same test keeps failing) and no progress (many calls with no file or test changing), not only exact repeats.
 * **Alerts for overnight runs.** A desktop notification or a Slack message when a circuit trips, so an unattended run can wake you.
+
+## About the name
+
+**Munim** (मुनीम) is the Hindi word for the bookkeeper of a traditional Indian business, who writes down every rupee that comes in or goes out. TokenMunim keeps the same kind of books for your agent's tokens.
 
 ## Develop
 

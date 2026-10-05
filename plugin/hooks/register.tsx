@@ -5,11 +5,11 @@ import type { SessionSummary, Tab, View } from '../types'
 import {
   addTrip,
   allowOnce,
-  bahiMarkdown,
+  ledgerMarkdown,
   bookCost,
   bookTokens,
   check,
-  closeKhata,
+  endTask,
   emptyBook,
   fingerprint,
   haltIfOver,
@@ -20,27 +20,27 @@ import {
   nameAgents,
   noteAgentCall,
   normalize,
-  openKhata,
+  startTask,
   parseMarker,
   raiseBudget,
   record,
   setLimits,
-  skipKhata,
+  skipTask,
   statement,
   summarize,
   summary,
   toolLabel,
 } from './ledger'
 import type { Limits, Usage } from './ledger'
-import { DEFAULT_VIEW, drawPane, toggleSection } from './pane'
+import { DEFAULT_VIEW, drawPane, migrateView, toggleSection } from './pane'
 
 const PANE = 'tokenmunim'
 const OWN = 'mcp__tokenmunim__'
 // Tools the agent needs to get itself out of a halt are never blocked.
 const EXEMPT = new Set(['ToolSearch'])
-const BAHI_KEY = 'bahi'
-const TABS: readonly Tab[] = ['overview', 'khatas', 'tape', 'trips', 'agents']
-const SECTIONS: readonly string[] = ['burn', 'mix', 'khatas', 'tape']
+const HISTORY_KEY = 'history'
+const TABS: readonly Tab[] = ['overview', 'tasks', 'activity', 'alerts', 'agents']
+const SECTIONS: readonly string[] = ['burn', 'mix', 'tasks', 'activity']
 const book = atom({ plugin: 'tokenmunim', key: 'book' } as const, emptyBook())
 const view = atom({ plugin: 'tokenmunim', key: 'view' } as const, DEFAULT_VIEW)
 
@@ -50,12 +50,12 @@ const fileStamp = (ms: number) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`
 }
 
-// Where this session's bahi lives, worked out once per load.
+// Where this session's ledger lives, worked out once per load.
 let limits: Limits = limitsFrom({})
 let cwd: string | undefined
 let home: string | undefined
 let startedAt = 0
-let bahiFile: string | undefined
+let ledgerFile: string | undefined
 let isAlerting = false
 let agentsCheckedAt = 0
 
@@ -64,34 +64,34 @@ async function costNow($: EngineInterface) {
 }
 
 async function locate($: EngineInterface) {
-  if (bahiFile !== undefined) return
+  if (ledgerFile !== undefined) return
   try {
     startedAt = (await $.session.usage()).startedAt
     cwd = (await $.fs.stat('.', { resolve: true })).realPath
     home = await $.env.get('HOME')
-    if (cwd) bahiFile = `${cwd}/.tokenmunim/bahi-${fileStamp(startedAt)}.md`
+    if (cwd) ledgerFile = `${cwd}/.tokenmunim/ledger-${fileStamp(startedAt)}.md`
   } catch {
     // No file system here (a test, a remote host): the pane still works.
   }
 }
 
-// The bahi file is best effort: a failed write never gets in the agent's way.
-async function writeBahi($: EngineInterface): Promise<string | undefined> {
+// The ledger file is best effort: a failed write never gets in the agent's way.
+async function writeLedger($: EngineInterface): Promise<string | undefined> {
   try {
     await locate($)
-    if (bahiFile === undefined || cwd === undefined) return undefined
+    if (ledgerFile === undefined || cwd === undefined) return undefined
     const b = normalize(await read($, book))
     const now = await $.clock.now()
     await $.fs.write(`${cwd}/.tokenmunim/.gitignore`, '*\n')
-    await $.fs.write(bahiFile, bahiMarkdown(b, { startedAt, now, cwd, limits }))
-    return bahiFile
+    await $.fs.write(ledgerFile, ledgerMarkdown(b, { startedAt, now, cwd, limits }))
+    return ledgerFile
   } catch {
     return undefined
   }
 }
 
-async function openBahi($: EngineInterface) {
-  const file = await writeBahi($)
+async function openLedger($: EngineInterface) {
+  const file = await writeLedger($)
   if (file !== undefined) await $.process.run(['open', file])
 }
 
@@ -112,7 +112,7 @@ async function refreshAgents($: EngineInterface, now: number) {
 }
 
 // One model request finished: book its tokens, its cost and the plan limits,
-// and halt its khata if the reply carried it past its budget.
+// and halt its task if the reply carried it past its budget.
 async function noteStep($: EngineInterface, usage: Usage, agentId: string | undefined) {
   try {
     const now = await $.clock.now()
@@ -134,21 +134,21 @@ function alarm($: EngineInterface, text: string | undefined) {
 }
 
 // What the person did from the circuit card.
-async function decide($: EngineInterface, kind: 'raise' | 'allow' | 'skip', khataId?: string, by?: number) {
+async function decide($: EngineInterface, kind: 'raise' | 'allow' | 'skip', taskId?: string, by?: number) {
   const b = normalize(await read($, book))
-  const name = b.khatas.find(k => k.id === khataId)?.name ?? 'the khata'
-  if (kind === 'raise' && khataId !== undefined && by !== undefined) {
-    await update($, book, cur => raiseBudget(normalize(cur), khataId, by))
+  const name = b.tasks.find(k => k.id === taskId)?.name ?? 'the task'
+  if (kind === 'raise' && taskId !== undefined && by !== undefined) {
+    await update($, book, cur => raiseBudget(normalize(cur), taskId, by))
     $.ui.toast(`TokenMunim: ${name} gets ${money(by)} more budget`)
   } else if (kind === 'allow') {
     await update($, book, cur => allowOnce(normalize(cur)))
     $.ui.toast('TokenMunim: the next call goes through')
-  } else if (kind === 'skip' && khataId !== undefined) {
-    await update($, book, cur => skipKhata(normalize(cur), khataId))
+  } else if (kind === 'skip' && taskId !== undefined) {
+    await update($, book, cur => skipTask(normalize(cur), taskId))
     $.ui.toast(`TokenMunim: ${name} skipped; the agent moves on at its next call`)
   }
   alarm($, undefined)
-  await writeBahi($)
+  await writeLedger($)
 }
 
 export const register: Register = (on, options) => {
@@ -156,26 +156,26 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.tool.register({
-      name: 'open_khata',
+      name: 'start_task',
       description:
-        'Open a khata (a cost account) for the task you are starting, so its cost, steps and failures are tracked on their own, with an optional budget. Call it when you begin each distinct task of a batch. The previous khata is closed. If a khata is halted by TokenMunim, open the next one to continue.',
+        'Start a task: TokenMunim tracks its cost, tokens, calls and failures separately from everything else, with an optional budget. Call it when you begin each distinct piece of work in a batch; it ends the task before it. If TokenMunim halts a task, start the next one to continue.',
       inputSchema: {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Short name of the task, like "strategy 3" or "migrate billing service".' },
-          budget_usd: { type: 'number', description: 'Optional budget in USD for this khata.' },
+          budget_usd: { type: 'number', description: 'Optional budget in USD for this task.' },
         },
         required: ['name'],
       },
     })
     await $.tool.register({
-      name: 'close_khata',
-      description: 'Close the current khata when its task is done.',
+      name: 'end_task',
+      description: 'End the current task when its work is done.',
     })
     await $.command.register({
       name: 'munim',
-      description: 'TokenMunim: open the pane, or statement, bahi, tab <name>, fold or unfold <section>, khata <name>, close, reset',
-      argumentHint: 'statement | bahi | tab <name> | fold <section> | unfold <section> | khata <name> | close | reset',
+      description: 'TokenMunim: open the pane, or statement, ledger, tab <name>, fold or unfold <section>, task <name>, end, reset',
+      argumentHint: 'statement | ledger | tab <name> | fold <section> | unfold <section> | task <name> | end | reset',
     })
     await locate($)
     // A status line left by an earlier load is stale; the alarm starts quiet.
@@ -184,27 +184,27 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('tool.call', { tool: 'mcp__tokenmunim__open_khata' }, async ($, e) => {
+  on('tool.call', { tool: 'mcp__tokenmunim__start_task' }, async ($, e) => {
     const name = typeof e.name === 'string' && e.name.trim() !== '' ? e.name.trim() : 'task'
-    const budget = typeof e.budget_usd === 'number' && e.budget_usd > 0 ? e.budget_usd : limits.khataBudgetUsd
+    const budget = typeof e.budget_usd === 'number' && e.budget_usd > 0 ? e.budget_usd : limits.taskBudgetUsd
     const now = await $.clock.now()
     const usd = await costNow($)
     const halted = haltedNamed(normalize(await read($, book)), name)
     if (halted !== undefined) {
-      return { result: `Khata "${halted.name}" was halted (${halted.haltReason ?? 'over budget'}) and stays halted. Tell the user, and open a khata for a different task, or stop.` }
+      return { result: `Task "${halted.name}" was halted (${halted.haltReason ?? 'over budget'}) and stays halted. Tell the user, then start a different task or stop.` }
     }
-    await update($, book, b => openKhata(bookCost(normalize(b), usd, now, e.agentId), name, budget, now)[0])
+    await update($, book, b => startTask(bookCost(normalize(b), usd, now, e.agentId), name, budget, now)[0])
     alarm($, undefined)
-    await writeBahi($)
-    return { result: `Khata "${name}" is open with a budget of ${money(budget)}. Work for this task is now booked to it.` }
+    await writeLedger($)
+    return { result: `Task "${name}" started with a budget of ${money(budget)}. Its cost, tokens and calls are now tracked on their own.` }
   })
 
-  on('tool.call', { tool: 'mcp__tokenmunim__close_khata' }, async ($, e) => {
+  on('tool.call', { tool: 'mcp__tokenmunim__end_task' }, async ($, e) => {
     const now = await $.clock.now()
     const usd = await costNow($)
-    await update($, book, b => closeKhata(bookCost(normalize(b), usd, now, e.agentId)))
-    await writeBahi($)
-    return { result: 'Khata closed.' }
+    await update($, book, b => endTask(bookCost(normalize(b), usd, now, e.agentId)))
+    await writeLedger($)
+    return { result: 'Task ended.' }
   })
 
   on('tool.call', async ($, e, next) => {
@@ -220,14 +220,14 @@ export const register: Register = (on, options) => {
     const marker = tool === 'Bash' && typeof input.command === 'string' ? parseMarker(input.command) : null
     if (marker !== null) {
       const said =
-        marker.verb === 'close' ? 'Khata closed.' : `Khata "${marker.name}" is open with a budget of ${money(marker.budgetUsd ?? limits.khataBudgetUsd)}.`
+        marker.verb === 'end' ? 'Task ended.' : `Task "${marker.name}" started with a budget of ${money(marker.budgetUsd ?? limits.taskBudgetUsd)}.`
       await update($, book, b => {
         const charged = bookCost(normalize(b), usd, startedAtMs, agentId)
-        return marker.verb === 'close'
-          ? closeKhata(charged)
-          : openKhata(charged, marker.name, marker.budgetUsd ?? limits.khataBudgetUsd, startedAtMs)[0]
+        return marker.verb === 'end'
+          ? endTask(charged)
+          : startTask(charged, marker.name, marker.budgetUsd ?? limits.taskBudgetUsd, startedAtMs)[0]
       })
-      await writeBahi($)
+      await writeLedger($)
       return { result: { stdout: said, stderr: '', interrupted: false }, text: said } as never
     }
 
@@ -246,16 +246,16 @@ export const register: Register = (on, options) => {
     if (stop !== null) {
       await update($, book, b => {
         const cur = normalize(b)
-        const khata = cur.khatas.find(k => k.id === cur.active)
+        const task = cur.tasks.find(k => k.id === cur.active)
         const blocked = record(cur, { ...base, ms: 0, outcome: 'blocked', note: stop.kind }, fp)
-        // A khata that stays halted is one trip, not one per call that bumps into it.
+        // A task that stays halted is one trip, not one per call that bumps into it.
         const last = cur.trips[cur.trips.length - 1]
-        if (stop.kind === 'halted' && last !== undefined && last.khataId === khata?.id && last.resolved === undefined) return blocked
+        if (stop.kind === 'halted' && last !== undefined && last.taskId === task?.id && last.resolved === undefined) return blocked
         return addTrip(blocked, {
           at: startedAtMs,
           kind: stop.kind,
-          khata: khata?.name ?? 'general',
-          khataId: khata?.id,
+          task: task?.name ?? 'general',
+          taskId: task?.id,
           tool: base.tool,
           summary: base.summary,
           reason: stop.short,
@@ -263,7 +263,7 @@ export const register: Register = (on, options) => {
       })
       $.ui.toast(`⊘ TokenMunim: ${stop.short}`)
       alarm($, `circuit tripped · ${stop.kind} · ${stop.short}`)
-      await writeBahi($)
+      await writeLedger($)
       return { deny: `TokenMunim circuit breaker (${stop.kind}): ${stop.reason}` }
     }
 
@@ -286,10 +286,10 @@ export const register: Register = (on, options) => {
     const usage = await $.session.usage()
     const b = await update($, book, cur => setLimits(bookCost(normalize(cur), usage.cost?.usd, now, e.agentId), usage.rateLimits, now))
     await refreshAgents($, now)
-    const saved = (await $.store.get(BAHI_KEY)) as SessionSummary[] | undefined
+    const saved = (await $.store.get(HISTORY_KEY)) as SessionSummary[] | undefined
     const others = (saved ?? []).filter(s => s.startedAt !== usage.startedAt)
-    await $.store.set(BAHI_KEY, [...others, summary(normalize(b), usage.startedAt)].slice(-50))
-    await writeBahi($)
+    await $.store.set(HISTORY_KEY, [...others, summary(normalize(b), usage.startedAt)].slice(-50))
+    await writeLedger($)
     return next(e)
   })
 
@@ -304,29 +304,29 @@ export const register: Register = (on, options) => {
     if (verb === 'tab') {
       const tab = TABS.find(t => t === (rest[0] ?? '').toLowerCase())
       if (tab === undefined) return { text: `Tabs: ${TABS.join(', ')}.` }
-      await update($, view, cur => ({ ...DEFAULT_VIEW, ...cur, tab, entry: null }))
+      await update($, view, cur => ({ ...migrateView(cur), tab, entry: null }))
       await $.ui.open({ id: PANE, title: 'TokenMunim' })
       return { text: `TokenMunim is showing ${tab}.` }
     }
     if (verb === 'fold' || verb === 'unfold') {
       const id = (rest[0] ?? '').toLowerCase()
       if (!SECTIONS.includes(id)) return { text: `Sections: ${SECTIONS.join(', ')}.` }
-      await update($, view, cur => toggleSection({ ...DEFAULT_VIEW, ...cur }, id, verb === 'unfold'))
+      await update($, view, cur => toggleSection({ ...migrateView(cur) }, id, verb === 'unfold'))
       await $.ui.open({ id: PANE, title: 'TokenMunim' })
       return { text: `${verb === 'fold' ? 'Folded' : 'Opened'} ${id}.` }
     }
-    if (verb === 'khata') {
+    if (verb === 'task') {
       const name = rest.join(' ').trim() || 'task'
       const usd = await costNow($)
-      await update($, book, b => openKhata(bookCost(normalize(b), usd, now), name, limits.khataBudgetUsd, now)[0])
+      await update($, book, b => startTask(bookCost(normalize(b), usd, now), name, limits.taskBudgetUsd, now)[0])
       alarm($, undefined)
-      await writeBahi($)
-      return { text: `Khata "${name}" is open with a budget of ${money(limits.khataBudgetUsd)}.` }
+      await writeLedger($)
+      return { text: `Task "${name}" started with a budget of ${money(limits.taskBudgetUsd)}.` }
     }
-    if (verb === 'close') {
-      await update($, book, b => closeKhata(normalize(b)))
-      await writeBahi($)
-      return { text: 'Khata closed.' }
+    if (verb === 'end' || verb === 'close') {
+      await update($, book, b => endTask(normalize(b)))
+      await writeLedger($)
+      return { text: 'Task ended.' }
     }
     if (verb === 'reset') {
       await update($, book, () => emptyBook())
@@ -334,41 +334,41 @@ export const register: Register = (on, options) => {
       alarm($, undefined)
       return { text: 'TokenMunim book reset for this session.' }
     }
-    if (verb === 'bahi' || verb === 'export' || verb === 'open') {
-      const file = await writeBahi($)
-      if (file === undefined) return { text: 'The bahi file could not be written here.' }
+    if (verb === 'ledger' || verb === 'export' || verb === 'open') {
+      const file = await writeLedger($)
+      if (file === undefined) return { text: 'The ledger file could not be written here.' }
       if (verb !== 'export') await $.process.run(['open', file])
-      return { text: `Bahi written to ${file}` }
+      return { text: `Ledger written to ${file}` }
     }
 
     const usage = await $.session.usage()
     const b = normalize(await update($, book, cur => bookCost(normalize(cur), usage.cost?.usd, now)))
-    const saved = ((await $.store.get(BAHI_KEY)) as SessionSummary[] | undefined) ?? []
-    const file = await writeBahi($)
+    const saved = ((await $.store.get(HISTORY_KEY)) as SessionSummary[] | undefined) ?? []
+    const file = await writeLedger($)
     if (verb === 'statement') return { text: statement(b, limits, saved.filter(s => s.startedAt !== usage.startedAt), file) }
-    return { text: `Unknown option "${verb}". Try: statement, bahi, tab <name>, fold <section>, unfold <section>, khata <name>, close, reset.` }
+    return { text: `Unknown option "${verb}". Try: statement, ledger, tab <name>, fold <section>, unfold <section>, task <name>, end, reset.` }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const kit = $.ui.resolve(e)
-    // A reload forgets where the bahi lives; find it again on the first draw.
-    if (bahiFile === undefined) await locate($)
+    // A reload forgets where the ledger lives; find it again on the first draw.
+    if (ledgerFile === undefined) await locate($)
     const b = normalize(await read($, book))
-    const v: View = { ...DEFAULT_VIEW, ...(await read($, view)) }
+    const v: View = migrateView(await read($, view))
     const now = await $.clock.now()
     const rows = e.props.scroll?.bodyRows ?? (e.viewport?.rows ?? 50) - 6
     return drawPane(
       kit,
-      { book: b, view: v, now, limits, width: e.props.bodyColumns, rows, hasFile: bahiFile !== undefined, startedAt },
+      { book: b, view: v, now, limits, width: e.props.bodyColumns, rows, hasFile: ledgerFile !== undefined, startedAt },
       {
-        setTab: tab => void update($, view, cur => ({ ...DEFAULT_VIEW, ...cur, tab, entry: null })),
-        toggle: (id, isFolded) => void update($, view, cur => toggleSection({ ...DEFAULT_VIEW, ...cur }, id, isFolded)),
-        drill: khata => void update($, view, cur => ({ ...DEFAULT_VIEW, ...cur, khata, tab: khata === null ? cur.tab : 'tape', entry: null })),
-        expand: entry => void update($, view, cur => ({ ...DEFAULT_VIEW, ...cur, entry })),
-        openBahi: () => void openBahi($),
-        raise: (khataId, by) => void decide($, 'raise', khataId, by),
+        setTab: tab => void update($, view, cur => ({ ...migrateView(cur), tab, entry: null })),
+        toggle: (id, isFolded) => void update($, view, cur => toggleSection({ ...migrateView(cur) }, id, isFolded)),
+        drill: task => void update($, view, cur => ({ ...migrateView(cur), task, tab: task === null ? cur.tab : 'activity', entry: null })),
+        expand: entry => void update($, view, cur => ({ ...migrateView(cur), entry })),
+        openLedger: () => void openLedger($),
+        raise: (taskId, by) => void decide($, 'raise', taskId, by),
         allow: () => void decide($, 'allow'),
-        skip: khataId => void decide($, 'skip', khataId),
+        skip: taskId => void decide($, 'skip', taskId),
       },
     )
   })

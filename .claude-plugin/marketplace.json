@@ -1,6 +1,6 @@
 {
   "name": "tokenmunim",
-  "description": "TokenMunim: a munim for your AI agent, as a Claude Code mod.",
+  "description": "TokenMunim: cost control for AI agents, as a Claude Code mod.",
   "owner": {
     "name": "Piyush Sinha",
     "url": "https://github.com/PiyushSinha-9"
@@ -9,7 +9,7 @@
     {
       "name": "tokenmunim",
       "source": "./plugin",
-      "description": "A munim for your AI agent: a khata per task, a live bahi of every step, and a circuit breaker for runaway spend."
+      "description": "Cost control for AI agents: a budget per task, a live ledger of every step, and a circuit breaker that stops loops, burn spikes and runaway spend."
     }
   ]
 }

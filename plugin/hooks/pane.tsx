@@ -6,7 +6,7 @@
 // meaning. Every row is laid out for the width it actually has, and nothing is
 // ever padded past its panel.
 
-import type { AgentLedger, Book, Entry, Khata, Tab, Trip, View } from '../types'
+import type { AgentLedger, Book, Entry, Task, Tab, Trip, View } from '../types'
 import { brailleArea, sparkline } from './chart'
 import {
   burnRate,
@@ -34,12 +34,12 @@ export type PaneActions = {
   setTab: (tab: Tab) => void
   // `isFolded` is how the section is drawn now, which may be the pane's own doing.
   toggle: (section: string, isFolded: boolean) => void
-  drill: (khataId: string | null) => void
+  drill: (taskId: string | null) => void
   expand: (index: number | null) => void
-  openBahi: () => void
-  raise: (khataId: string, by: number) => void
+  openLedger: () => void
+  raise: (taskId: string, by: number) => void
   allow: () => void
-  skip: (khataId: string) => void
+  skip: (taskId: string) => void
 }
 
 export type PaneData = {
@@ -53,7 +53,7 @@ export type PaneData = {
   startedAt?: number
 }
 
-export const DEFAULT_VIEW: View = { tab: 'overview', folded: ['tape'], opened: [], khata: null, entry: null }
+export const DEFAULT_VIEW: View = { tab: 'overview', folded: ['activity'], opened: [], task: null, entry: null }
 
 // ---- the palette -------------------------------------------------------------
 
@@ -76,7 +76,7 @@ const BLUE = '#60A5FA'
 const TEAL = '#2DD4BF'
 const VIOLET = '#A78BFA'
 
-const STATUS: Record<Khata['status'], { glyph: string; color: string }> = {
+const STATUS: Record<Task['status'], { glyph: string; color: string }> = {
   open: { glyph: '●', color: GREEN },
   closed: { glyph: '○', color: FAINT },
   halted: { glyph: '■', color: RED },
@@ -140,8 +140,8 @@ const wrap = (text: string, width: number, lines: number): string[] => {
   return kept
 }
 
-// A step to raise a halted khata by: half its budget, at least five cents.
-export const raiseStep = (k: Khata) => Math.max(0.05, Math.round(k.budgetUsd * 50) / 100)
+// A step to raise a halted task by: half its budget, at least five cents.
+export const raiseStep = (k: Task) => Math.max(0.05, Math.round(k.budgetUsd * 50) / 100)
 
 const isActionable = (trip: Trip | undefined): trip is Trip => trip !== undefined && trip.resolved === undefined
 
@@ -165,7 +165,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   const R = Math.max(24, d.rows)
 
   const trip = b.trips[b.trips.length - 1]
-  const active = b.khatas.find(k => k.id === b.active)
+  const active = b.tasks.find(k => k.id === b.active)
   const lastEntry = b.entries[b.entries.length - 1]
   const isLive = lastEntry !== undefined && now - lastEntry.at < 90_000
 
@@ -220,11 +220,11 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         <Box>
           {isLive ? pill('● LIVE', GREEN, GREEN_BG) : pill('○ IDLE', FAINT)}
           {d.hasFile ? <Text> </Text> : null}
-          {d.hasFile ? link('open-bahi', 'bahi.md ↗', act.openBahi) : null}
+          {d.hasFile ? link('open-ledger', 'ledger.md ↗', act.openLedger) : null}
         </Box>
       </Box>
       <Box justifyContent="space-between">
-        <Text color={FAINT}>{cut('  the munim for your AI agent', inner - elapsed.length - 1)}</Text>
+        <Text color={FAINT}>{cut('  cost control for AI agents', inner - elapsed.length - 1)}</Text>
         {elapsed !== '' ? <Text color={FAINT}>{elapsed}</Text> : null}
       </Box>
     </Box>
@@ -233,9 +233,9 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   const agentCount = Math.max(1, b.agents.length)
   const tabDefs: { id: Tab; long: string; short: string; n?: number }[] = [
     { id: 'overview', long: 'Overview', short: 'Home' },
-    { id: 'khatas', long: 'Khatas', short: 'Khatas', n: b.khatas.length },
-    { id: 'tape', long: 'Tape', short: 'Tape', n: b.entries.length },
-    { id: 'trips', long: 'Trips', short: 'Trips', n: b.trips.length },
+    { id: 'tasks', long: 'Tasks', short: 'Tasks', n: b.tasks.length },
+    { id: 'activity', long: 'Activity', short: 'Activity', n: b.entries.length },
+    { id: 'alerts', long: 'Alerts', short: 'Alerts', n: b.trips.length },
     { id: 'agents', long: 'Agents', short: 'Agents', n: agentCount },
   ]
   // The richest tab labels that fit on one line; each label carries a space a side.
@@ -266,7 +266,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     </Box>
   )
 
-  const footerLeft = inner >= 54 ? '/munim statement · bahi · tab · fold' : '/munim'
+  const footerLeft = inner >= 54 ? '/munim statement · ledger · tab · fold' : '/munim'
   const footer = (gap: number) => (
     <Box key="footer" marginTop={gap} justifyContent="space-between">
       <Text color={FAINT}>{footerLeft}</Text>
@@ -470,8 +470,8 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   // ---- the circuit callout -------------------------------------------------
 
   const actionable = (t: Trip) => {
-    const khata = b.khatas.find(k => k.id === t.khataId) ?? b.khatas.find(k => k.name === t.khata)
-    return isActionable(t) && (now - t.at < 10 * 60_000 || khata?.status === 'halted')
+    const task = b.tasks.find(k => k.id === t.taskId) ?? b.tasks.find(k => k.name === t.task)
+    return isActionable(t) && (now - t.at < 10 * 60_000 || task?.status === 'halted')
   }
   const reasonLines = (t: Trip) => wrap(t.reason, C - 2, 2)
   const tripRowsOf = (t: Trip, withActions: boolean) =>
@@ -479,22 +479,22 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   const tripCard = (t: Trip, key: string, withActions: boolean, marginTop: number) => {
     const isFresh = now - t.at < 10 * 60_000
     const isLatest = key.startsWith('trip-latest')
-    const khata = b.khatas.find(k => k.id === t.khataId) ?? b.khatas.find(k => k.name === t.khata)
+    const task = b.tasks.find(k => k.id === t.taskId) ?? b.tasks.find(k => k.name === t.task)
     const live = withActions && actionable(t)
     const bar = <Text color={t.resolved ? FAINT : RED}>{'▎'}</Text>
     const buttons: unknown[] = []
     if (live) {
-      if ((t.kind === 'budget' || t.kind === 'halted') && khata && khata.budgetUsd > 0) {
-        const by = raiseStep(khata)
-        buttons.push(action(`${key}-raise-btn`, `+${money(by)} budget`, () => act.raise(khata.id, by), true))
+      if ((t.kind === 'budget' || t.kind === 'halted') && task && task.budgetUsd > 0) {
+        const by = raiseStep(task)
+        buttons.push(action(`${key}-raise-btn`, `+${money(by)} budget`, () => act.raise(task.id, by), true))
       }
       buttons.push(action(`${key}-allow-btn`, 'Allow once', () => act.allow(), false))
-      if ((t.kind === 'loop' || t.kind === 'burn') && khata && khata.id !== GENERAL && khata.status !== 'halted') {
-        buttons.push(action(`${key}-skip-btn`, narrow ? 'Skip' : 'Skip task', () => act.skip(khata.id), false))
+      if ((t.kind === 'loop' || t.kind === 'burn') && task && task.id !== GENERAL && task.status !== 'halted') {
+        buttons.push(action(`${key}-skip-btn`, narrow ? 'Skip' : 'Skip task', () => act.skip(task.id), false))
       }
     }
     const title = t.resolved || !isLatest ? 'CIRCUIT TRIP' : isFresh ? 'CIRCUIT TRIPPED' : 'LAST CIRCUIT TRIP'
-    const when = `${!narrow && b.trips.length > 1 && isLatest ? `${b.trips.length} trips · ` : ''}${clockTime(t.at, narrow)}`
+    const when = `${!narrow && b.trips.length > 1 && isLatest ? `${b.trips.length} alerts · ` : ''}${clockTime(t.at, narrow)}`
     return panel(
       key,
       [
@@ -514,7 +514,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         )),
         <Box key={`${key}-where`}>
           {bar}
-          <Text color={FAINT}>{` ${cut(`${t.khata} · ${t.tool} · ${t.summary}`, C - 2)}`}</Text>
+          <Text color={FAINT}>{` ${cut(`${t.task} · ${t.tool} · ${t.summary}`, C - 2)}`}</Text>
         </Box>,
         t.resolved !== undefined ? (
           <Box key={`${key}-done`}>
@@ -534,19 +534,19 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     )
   }
 
-  // ---- khata rows ----------------------------------------------------------
+  // ---- task rows ----------------------------------------------------------
 
   // Columns drop in this order as the pane narrows: tokens, then calls.
   const showTokens = C >= 58
   const showCalls = C >= 46
   const BAR = C >= 46 ? 10 : 6
   const N = Math.max(6, C - 2 - 8 - (showTokens ? 7 : 0) - 1 - BAR - 6 - (showCalls ? 6 : 0) - 2)
-  const khataHead = (
-    <Text key="khata-head" color={FAINT}>
-      {`  ${pad('KHATA', N)}${lpad('SPENT', 8)}${showTokens ? lpad('TOKENS', 7) : ''} ${pad('BUDGET', BAR)}${lpad('USED', 6)}${showCalls ? lpad('CALLS', 6) : ''}`}
+  const taskHead = (
+    <Text key="task-head" color={FAINT}>
+      {`  ${pad('TASK', N)}${lpad('SPENT', 8)}${showTokens ? lpad('TOKENS', 7) : ''} ${pad('BUDGET', BAR)}${lpad('USED', 6)}${showCalls ? lpad('CALLS', 6) : ''}`}
     </Text>
   )
-  const khataRow = (k: Khata, drill: boolean) => {
+  const taskRow = (k: Task, drill: boolean) => {
     const s = STATUS[k.status]
     const hasBudget = k.budgetUsd > 0
     const ratio = hasBudget ? k.usd / k.budgetUsd : 0
@@ -576,7 +576,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     )
   }
 
-  // ---- tape rows -----------------------------------------------------------
+  // ---- activity rows -----------------------------------------------------------
 
   // Narrow panes drop the duration so what a call was for keeps its room.
   const TIME = narrow ? 6 : 9
@@ -584,7 +584,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   const S = Math.max(6, C - TIME - 2 - 7 - DUR - 2)
   const agentName = (id: string | undefined) => b.agents.find(a => a.id === (id ?? MAIN))?.name ?? 'main'
   const entryDetails = (en: Entry) => {
-    const khataName = b.khatas.find(k => k.id === en.khata)?.name ?? en.khata
+    const taskName = b.tasks.find(k => k.id === en.task)?.name ?? en.task
     const result = en.outcome === 'blocked' ? `blocked by the ${en.note ?? ''} circuit` : en.outcome === 'fail' ? 'failed' : 'worked'
     const TEXT = Math.max(8, C - 12)
     const row = (label: string, value: string, color?: string) => (
@@ -595,7 +595,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     )
     return (
       <Box key="entry-details" flexDirection="column" marginLeft={2} backgroundColor={PANEL_HI} paddingX={1}>
-        {row('khata', khataName)}
+        {row('task', taskName)}
         {row('agent', agentName(en.agent))}
         {row('result', en.outcome === 'blocked' ? result : `${result} · took ${duration(en.ms)}`, OUTCOME[en.outcome].color)}
         {wrap(en.summary, TEXT, 3).map((line, i) => (
@@ -607,7 +607,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
       </Box>
     )
   }
-  const tapeRow = (en: Entry, index: number, expandable: boolean) => {
+  const activityRow = (en: Entry, index: number, expandable: boolean) => {
     const o = OUTCOME[en.outcome]
     const isBlocked = en.outcome === 'blocked'
     const isOpen = view.entry === index
@@ -635,9 +635,9 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     const tilesRows = 3 * tileRows.length + (tileRows.length - 1)
     const burnOpen = 1 + chartH + 1
     const mixOpen = 1 + 1 + (total === 0 ? 0 : legendLong ? 1 : 2) + (subagents.length > 0 ? 1 : 0)
-    const haltedRows = (count: number) => b.khatas.slice(-count).filter(k => k.status === 'halted').length
-    const khatasOpen = (count: number) => 2 + Math.max(1, count) + haltedRows(count)
-    const tapeOpen = (count: number) => 1 + Math.max(1, count)
+    const haltedRows = (count: number) => b.tasks.slice(-count).filter(k => k.status === 'halted').length
+    const tasksOpen = (count: number) => 2 + Math.max(1, count) + haltedRows(count)
+    const activityOpen = (count: number) => 1 + Math.max(1, count)
 
     // Fit: shrink the lists, then fold what the person can unfold again, but
     // never a section the person opened: their choice wins, and the pane
@@ -647,31 +647,31 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     const autoFold = (id: string) => {
       if (!opened.has(id)) shut.add(id)
     }
-    let khataCount = Math.min(b.khatas.length, 8)
-    let tapeCount = 5
+    let taskCount = Math.min(b.tasks.length, 8)
+    let activityCount = 5
     const panels = () =>
       limitRows + tilesRows + (shut.has('burn') ? 1 : burnOpen) + (shut.has('mix') ? 1 : mixOpen) + tripRows +
-      (shut.has('khatas') ? 1 : khatasOpen(khataCount)) + (shut.has('tape') ? 1 : tapeOpen(tapeCount))
+      (shut.has('tasks') ? 1 : tasksOpen(taskCount)) + (shut.has('activity') ? 1 : activityOpen(activityCount))
     const chrome = 2 + 3 + 1 // header, tabs, footer
     const gaps = 6 + (trip ? 1 : 0) + 1
     const fits = () => chrome + panels() + gaps <= R
-    while (!fits() && khataCount > 5) khataCount -= 1
-    while (!fits() && tapeCount > 2 && !shut.has('tape')) tapeCount -= 1
-    for (const id of ['tape', 'mix']) if (!fits()) autoFold(id)
-    while (!fits() && khataCount > 3) khataCount -= 1
-    for (const id of ['burn', 'khatas']) if (!fits()) autoFold(id)
+    while (!fits() && taskCount > 5) taskCount -= 1
+    while (!fits() && activityCount > 2 && !shut.has('activity')) activityCount -= 1
+    for (const id of ['activity', 'mix']) if (!fits()) autoFold(id)
+    while (!fits() && taskCount > 3) taskCount -= 1
+    for (const id of ['burn', 'tasks']) if (!fits()) autoFold(id)
 
-    const shownKhatas = b.khatas.slice(-khataCount)
-    const overBudget = b.khatas.filter(k => k.budgetUsd > 0 && k.usd > k.budgetUsd).length
-    const khataRight = (
-      <Box key="khatas-right">
-        <Text color={MUTED}>{`${b.khatas.length} · ${money(spent)}`}</Text>
+    const shownTasks = b.tasks.slice(-taskCount)
+    const overBudget = b.tasks.filter(k => k.budgetUsd > 0 && k.usd > k.budgetUsd).length
+    const taskRight = (
+      <Box key="tasks-right">
+        <Text color={MUTED}>{`${b.tasks.length} · ${money(spent)}`}</Text>
         {overBudget > 0 && !narrow ? <Text color={RED}>{` · ${overBudget} over`}</Text> : null}
-        {b.khatas.length > shownKhatas.length && !narrow ? <Text color={FAINT}>{` · latest ${shownKhatas.length}`}</Text> : null}
+        {b.tasks.length > shownTasks.length && !narrow ? <Text color={FAINT}>{` · latest ${shownTasks.length}`}</Text> : null}
       </Box>
     )
-    const tapeRight = lastEntry ? (
-      <Box key="tape-right">
+    const activityRight = lastEntry ? (
+      <Box key="activity-right">
         <Text color={MUTED}>{`${b.entries.length} · last `}</Text>
         <Text color={TOOL_COLOR[lastEntry.tool] ?? MUTED}>{lastEntry.tool}</Text>
         <Text color={OUTCOME[lastEntry.outcome].color}>{` ${OUTCOME[lastEntry.outcome].glyph}`}</Text>
@@ -679,7 +679,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     ) : (
       muted('empty', 8)
     )
-    const tape = b.entries.slice(-tapeCount).reverse()
+    const activity = b.entries.slice(-activityCount).reverse()
     const newest = b.entries.length - 1
 
     return (
@@ -690,25 +690,25 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         {section('mix', 'TOKEN MIX', mixRight, shut.has('mix'), mixBody, 1)}
         {trip !== undefined ? tripCard(trip, 'trip-latest', true, 1) : null}
         {section(
-          'khatas',
-          'KHATAS',
-          khataRight,
-          shut.has('khatas'),
-          <Box key="khatas-body" flexDirection="column">
-            {khataHead}
-            {b.khatas.length === 0 ? <Text color={FAINT}>{cut('  No khata yet. Work books to "general".', C)}</Text> : null}
-            {shownKhatas.map(k => khataRow(k, true))}
+          'tasks',
+          'TASKS',
+          taskRight,
+          shut.has('tasks'),
+          <Box key="tasks-body" flexDirection="column">
+            {taskHead}
+            {b.tasks.length === 0 ? <Text color={FAINT}>{cut('  No task yet. Work counts toward "general".', C)}</Text> : null}
+            {shownTasks.map(k => taskRow(k, true))}
           </Box>,
           1,
         )}
         {section(
-          'tape',
-          'TAPE',
-          tapeRight,
-          shut.has('tape'),
-          <Box key="tape-body" flexDirection="column">
-            {tape.length === 0 ? <Text color={FAINT}>Waiting for the first step…</Text> : null}
-            {tape.map((en, i) => tapeRow(en, newest - i, false))}
+          'activity',
+          'ACTIVITY',
+          activityRight,
+          shut.has('activity'),
+          <Box key="activity-body" flexDirection="column">
+            {activity.length === 0 ? <Text color={FAINT}>Waiting for the first step…</Text> : null}
+            {activity.map((en, i) => activityRow(en, newest - i, false))}
           </Box>,
           1,
         )}
@@ -724,32 +724,32 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     </Box>
   )
 
-  const khatasTab = () => {
+  const tasksTab = () => {
     const room = Math.max(3, R - 2 - 3 - 6)
-    const shown = b.khatas.slice(-room)
-    const open = b.khatas.filter(k => k.status === 'open').length
-    const closed = b.khatas.filter(k => k.status === 'closed').length
-    const halted = b.khatas.filter(k => k.status === 'halted').length
+    const shown = b.tasks.slice(-room)
+    const open = b.tasks.filter(k => k.status === 'open').length
+    const closed = b.tasks.filter(k => k.status === 'closed').length
+    const halted = b.tasks.filter(k => k.status === 'halted').length
     return (
-      <Box key="khatas-tab" flexDirection="column">
+      <Box key="tasks-tab" flexDirection="column">
         {panel(
-          'khatas-card',
+          'tasks-card',
           [
             listHead(
-              'KHATAS',
-              <Box key="khatas-tab-right">
+              'TASKS',
+              <Box key="tasks-tab-right">
                 <Text color={MUTED}>{`${open} open · ${closed} closed`}</Text>
                 {halted > 0 ? <Text color={RED}>{` · ${halted} halted`}</Text> : null}
-                {wide ? <Text color={FAINT}>{' · › its tape'}</Text> : null}
+                {wide ? <Text color={FAINT}>{' · › its calls'}</Text> : null}
               </Box>,
             ),
-            khataHead,
-            b.khatas.length === 0 ? <Text key="none" color={FAINT}>  No khata yet.</Text> : null,
-            b.khatas.length > shown.length ? <Text key="earlier" color={FAINT}>{cut(`  + ${b.khatas.length - shown.length} earlier in bahi.md`, C)}</Text> : null,
-            ...shown.map(k => khataRow(k, true)),
-            <Box key="khatas-total" marginTop={1} justifyContent="space-between">
+            taskHead,
+            b.tasks.length === 0 ? <Text key="none" color={FAINT}>  No task yet.</Text> : null,
+            b.tasks.length > shown.length ? <Text key="earlier" color={FAINT}>{cut(`  + ${b.tasks.length - shown.length} earlier in ledger.md`, C)}</Text> : null,
+            ...shown.map(k => taskRow(k, true)),
+            <Box key="tasks-total" marginTop={1} justifyContent="space-between">
               <Text color={FAINT}>total</Text>
-              <Text color={MUTED}>{cut(`${money(spent)} · ${compactTokens(b.tokens)} tokens · ${b.khatas.reduce((s, k) => s + k.calls, 0)} calls`, C - 7)}</Text>
+              <Text color={MUTED}>{cut(`${money(spent)} · ${compactTokens(b.tokens)} tokens · ${b.tasks.reduce((s, k) => s + k.calls, 0)} calls`, C - 7)}</Text>
             </Box>,
           ],
           1,
@@ -759,30 +759,30 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     )
   }
 
-  const tapeTab = () => {
-    const filter = view.khata
-    const indexed = b.entries.map((en, i) => ({ en, i })).filter(e => filter === null || e.en.khata === filter)
+  const activityTab = () => {
+    const filter = view.task
+    const indexed = b.entries.map((en, i) => ({ en, i })).filter(e => filter === null || e.en.task === filter)
     const expandedRows = view.entry !== null ? 7 : 0
     const room = Math.max(3, R - 2 - 3 - 5 - (filter ? 1 : 0) - expandedRows)
     const shown = indexed.slice(-room).reverse()
-    const filterName = filter ? b.khatas.find(k => k.id === filter)?.name ?? filter : null
+    const filterName = filter ? b.tasks.find(k => k.id === filter)?.name ?? filter : null
     return (
-      <Box key="tape-tab" flexDirection="column">
+      <Box key="activity-tab" flexDirection="column">
         {panel(
-          'tape-card',
+          'activity-card',
           [
-            listHead('TAPE', muted(`${indexed.length} entries · newest first${wide ? ' · › details' : ''}`, C - 6)),
+            listHead('ACTIVITY', muted(`${indexed.length} entries · newest first${wide ? ' · › details' : ''}`, C - 6)),
             filterName !== null ? (
-              <Box key="tape-filter">
-                <Text color={MUTED}>{'khata '}</Text>
+              <Box key="activity-filter">
+                <Text color={MUTED}>{'task '}</Text>
                 {pill(cut(filterName, Math.max(4, C - 22)), INK, GOLD)}
                 <Text>{'  '}</Text>
                 {link('clear-filter', 'show all ✕', () => act.drill(null))}
               </Box>
             ) : null,
-            shown.length === 0 ? <Text key="none" color={FAINT}>Nothing on the tape yet.</Text> : null,
-            ...shown.map(e => tapeRow(e.en, e.i, true)),
-            indexed.length > shown.length ? <Text key="earlier" color={FAINT}>{cut(`+ ${indexed.length - shown.length} earlier entries in bahi.md`, C)}</Text> : null,
+            shown.length === 0 ? <Text key="none" color={FAINT}>No activity yet.</Text> : null,
+            ...shown.map(e => activityRow(e.en, e.i, true)),
+            indexed.length > shown.length ? <Text key="earlier" color={FAINT}>{cut(`+ ${indexed.length - shown.length} earlier entries in ledger.md`, C)}</Text> : null,
           ],
           1,
         )}
@@ -791,7 +791,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     )
   }
 
-  const tripsTab = () => {
+  const alertsTab = () => {
     const newest = [...b.trips].reverse()
     const shown: Trip[] = []
     let rows = 2 + 3 + 2
@@ -807,13 +807,13 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
           ? panel(
               'no-trips',
               [
-                <Text key="no-trips-title" bold color={GREEN}>✓ NO CIRCUIT TRIPS</Text>,
-                <Text key="no-trips-text" color={FAINT}>{cut('Nothing has needed stopping yet.', C)}</Text>,
+                <Text key="no-trips-title" bold color={GREEN}>✓ NO ALERTS</Text>,
+                <Text key="no-trips-text" color={FAINT}>{cut('The circuit breaker has not stopped anything yet.', C)}</Text>,
               ],
               1,
             )
           : shown.map((t, i) => tripCard(t, i === 0 ? 'trip-latest-tab' : `trip-${i}`, i === 0, 1))}
-        {newest.length > shown.length ? <Text color={FAINT}>{cut(`+ ${newest.length - shown.length} earlier trips in bahi.md`, inner)}</Text> : null}
+        {newest.length > shown.length ? <Text color={FAINT}>{cut(`+ ${newest.length - shown.length} earlier alerts in ledger.md`, inner)}</Text> : null}
         {footer(1)}
       </Box>
     )
@@ -865,9 +865,9 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   }
 
   const body =
-    view.tab === 'khatas' ? khatasTab()
-    : view.tab === 'tape' ? tapeTab()
-    : view.tab === 'trips' ? tripsTab()
+    view.tab === 'tasks' ? tasksTab()
+    : view.tab === 'activity' ? activityTab()
+    : view.tab === 'alerts' ? alertsTab()
     : view.tab === 'agents' ? agentsTab()
     : overview()
 
@@ -878,4 +878,21 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
       {body}
     </Box>
   )
+}
+
+// A view as older versions saved it, with the old names for its tabs and sections.
+const RENAMED: Record<string, string> = { khatas: 'tasks', tape: 'activity', trips: 'alerts' }
+const TAB_IDS: readonly Tab[] = ['overview', 'tasks', 'activity', 'alerts', 'agents']
+
+export const migrateView = (saved: unknown): View => {
+  const v = (saved ?? {}) as Partial<View> & { khata?: string | null; tab?: string }
+  const rename = (id: string) => RENAMED[id] ?? id
+  const tab = rename(v.tab ?? 'overview') as Tab
+  return {
+    tab: TAB_IDS.includes(tab) ? tab : 'overview',
+    folded: (v.folded ?? DEFAULT_VIEW.folded).map(rename),
+    opened: (v.opened ?? []).map(rename),
+    task: v.task ?? v.khata ?? null,
+    entry: v.entry ?? null,
+  }
 }

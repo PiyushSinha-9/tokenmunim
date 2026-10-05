@@ -1,12 +1,12 @@
-export type KhataStatus = 'open' | 'closed' | 'halted'
+export type TaskStatus = 'open' | 'closed' | 'halted'
 
-export type Khata = {
+export type Task = {
   id: string
   name: string
-  status: KhataStatus
+  status: TaskStatus
   usd: number
   tokens: number
-  // 0 means no budget: the general khata, which catches unassigned work.
+  // 0 means no budget: the general task, which catches unassigned work.
   budgetUsd: number
   calls: number
   fails: number
@@ -19,7 +19,7 @@ export type Outcome = 'ok' | 'fail' | 'blocked'
 
 export type Entry = {
   at: number
-  khata: string
+  task: string
   tool: string
   summary: string
   ms: number
@@ -34,8 +34,8 @@ export type TripKind = 'budget' | 'session' | 'halted' | 'loop' | 'burn'
 export type Trip = {
   at: number
   kind: TripKind
-  khata: string
-  khataId?: string
+  task: string
+  taskId?: string
   tool: string
   summary: string
   reason: string
@@ -73,8 +73,8 @@ export type AgentLedger = {
 }
 
 export type Book = {
-  v: 4
-  khatas: Khata[]
+  v: 5
+  tasks: Task[]
   entries: Entry[]
   trips: Trip[]
   agents: AgentLedger[]
@@ -93,7 +93,7 @@ export type Book = {
   saved: number
 }
 
-export type Tab = 'overview' | 'khatas' | 'tape' | 'trips' | 'agents'
+export type Tab = 'overview' | 'tasks' | 'activity' | 'alerts' | 'agents'
 
 // What the pane is showing: its own state, apart from the book it draws.
 export type View = {
@@ -102,7 +102,7 @@ export type View = {
   // always wins over the pane folding things itself to fit its height.
   folded: string[]
   opened: string[]
-  khata: string | null
+  task: string | null
   entry: number | null
 }
 
@@ -110,7 +110,7 @@ export type SessionSummary = {
   startedAt: number
   usd: number
   tokens?: number
-  khatas: { name: string; status: KhataStatus; usd: number; calls: number }[]
+  tasks: { name: string; status: TaskStatus; usd: number; calls: number }[]
 }
 
 declare module 'claude-code' {
