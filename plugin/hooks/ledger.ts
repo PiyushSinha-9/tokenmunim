@@ -1,7 +1,21 @@
 // The munim's arithmetic: pure functions over a Book, so every rule is testable
-// without a session. register.tsx wires them to events and draws them.
+// without a session. register.tsx wires them to events, pane.tsx draws them.
 
-import type { Book, Entry, Khata, Outcome, RateWindow, Sample, SessionSummary, TokenSample, Trip, TripKind } from '../types'
+import type {
+  AgentLedger,
+  Book,
+  Entry,
+  Khata,
+  LimitSample,
+  Outcome,
+  RateWindow,
+  Sample,
+  SessionSummary,
+  TokenMix,
+  TokenSample,
+  Trip,
+  TripKind,
+} from '../types'
 
 export type Limits = {
   khataBudgetUsd: number
@@ -12,43 +26,69 @@ export type Limits = {
 
 export type Verdict = { kind: TripKind; reason: string; short: string }
 
+// A reply's usage as the API reports it.
+export type Usage = {
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+  model?: string
+}
+
 export const GENERAL = 'general'
+export const MAIN = 'main'
 export const MAX_ENTRIES = 2000
 export const MAX_TRIPS = 100
+export const MAX_AGENTS = 50
 export const SAMPLE_KEEP_MS = 30 * 60_000
 export const BURN_WINDOW_MS = 120_000
 export const BURN_PAUSE_MS = 120_000
+export const RUNWAY_WINDOW_MS = 20 * 60_000
+
+const emptyMix = (): TokenMix => ({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0 })
 
 export const emptyBook = (): Book => ({
-  v: 3,
+  v: 4,
   khatas: [],
   entries: [],
   trips: [],
+  agents: [],
   active: null,
   lastUsd: null,
   samples: [],
   tokens: 0,
   tokenSamples: [],
+  mix: emptyMix(),
   rateLimits: [],
+  limitSamples: {},
   streaks: {},
   burnPausedUntil: 0,
+  passes: 0,
   saved: 0,
 })
 
-type OlderBook = Partial<Omit<Book, 'v' | 'khatas'>> & { v?: number; khatas?: (Omit<Khata, 'tokens'> & { tokens?: number })[] }
+type OlderBook = Partial<Omit<Book, 'v' | 'khatas'>> & {
+  v?: number
+  khatas?: (Omit<Khata, 'tokens'> & { tokens?: number })[]
+}
 
 // Brings a book written by an older version up to this one. Version 2 took the
-// budget off the general khata (lifting a budget halt on it); version 3 counts tokens.
+// budget off the general khata (lifting a budget halt on it), version 3 counts
+// tokens, version 4 adds agents, the token mix and the limit history.
 export const normalize = (book: OlderBook | Book | undefined | null): Book => {
-  if (book && book.v === 3) return book as Book
+  if (book && book.v === 4) return book as Book
   const src: OlderBook = book ?? {}
-  const base = { ...emptyBook(), ...src, v: 3 as const }
+  const base = { ...emptyBook(), ...src, v: 4 as const }
   return {
     ...base,
     trips: src.trips ?? [],
+    agents: src.agents ?? [],
     tokens: src.tokens ?? 0,
     tokenSamples: src.tokenSamples ?? [],
+    mix: src.mix ?? emptyMix(),
     rateLimits: src.rateLimits ?? [],
+    limitSamples: src.limitSamples ?? {},
+    passes: src.passes ?? 0,
     khatas: (src.khatas ?? []).map(k => {
       const counted: Khata = { ...k, tokens: k.tokens ?? 0 }
       return k.id === GENERAL && (src.v ?? 1) < 2
@@ -71,7 +111,9 @@ export const limitsFrom = (options: Readonly<Record<string, unknown>>): Limits =
   }
 }
 
-const money = (n: number) => `$${n.toFixed(2)}`
+export const money = (n: number) => `$${n.toFixed(2)}`
+
+// ---- khatas ----------------------------------------------------------------
 
 const newKhata = (id: string, name: string, budgetUsd: number, now: number): Khata => ({
   id,
@@ -122,20 +164,100 @@ export const closeKhata = (book: Book): Book => {
   return { ...shut, active: null }
 }
 
-// Books what the session spent since the last reading to the active khata.
-export const bookCost = (book: Book, usd: number | undefined, now: number): Book => {
+// ---- agents ----------------------------------------------------------------
+
+const newAgent = (id: string, now: number): AgentLedger => ({
+  id,
+  name: id === MAIN ? 'main' : 'subagent',
+  usd: 0,
+  tokens: 0,
+  mix: emptyMix(),
+  steps: 0,
+  calls: 0,
+  firstAt: now,
+  lastAt: now,
+})
+
+const withAgent = (book: Book, agentId: string | undefined, now: number, fn: (a: AgentLedger) => AgentLedger): Book => {
+  const id = agentId ?? MAIN
+  const found = book.agents.some(a => a.id === id)
+  const agents = found ? book.agents : [...book.agents, newAgent(id, now)].slice(-MAX_AGENTS)
+  return { ...book, agents: agents.map(a => (a.id === id ? fn(a) : a)) }
+}
+
+// Names and states from the engine's list of agents.
+export const nameAgents = (book: Book, infos: readonly { id: string; description: string; type: string; status: string }[]): Book => ({
+  ...book,
+  agents: book.agents.map(a => {
+    const info = infos.find(i => i.id === a.id)
+    return info ? { ...a, name: info.description || info.type || a.name, type: info.type, status: info.status } : a
+  }),
+})
+
+export const noteAgentCall = (book: Book, agentId: string | undefined, now: number): Book =>
+  withAgent(book, agentId, now, a => ({ ...a, calls: a.calls + 1, lastAt: now }))
+
+// ---- cost and tokens -------------------------------------------------------
+
+// Books what the session spent since the last reading to the active khata and
+// to the loop whose reply or call brought the reading.
+export const bookCost = (book: Book, usd: number | undefined, now: number, agentId?: string): Book => {
   if (usd === undefined) return book
   const samples = [...book.samples, { at: now, usd }].filter(s => now - s.at <= SAMPLE_KEEP_MS).slice(-800)
   if (book.lastUsd === null) return { ...book, lastUsd: usd, samples }
   const delta = Math.max(0, usd - book.lastUsd)
   const [withActive, khata] = activeKhata(book, now)
   const charged = withKhata(withActive, khata.id, k => ({ ...k, usd: k.usd + delta }))
-  return { ...charged, lastUsd: usd, samples }
+  const byAgent = delta > 0 ? withAgent(charged, agentId, now, a => ({ ...a, usd: a.usd + delta, lastAt: now })) : charged
+  return { ...byAgent, lastUsd: usd, samples }
+}
+
+const addMix = (a: TokenMix, b: TokenMix): TokenMix => ({
+  input: a.input + b.input,
+  cacheRead: a.cacheRead + b.cacheRead,
+  cacheWrite: a.cacheWrite + b.cacheWrite,
+  output: a.output + b.output,
+})
+
+export const mixOf = (u: Usage): TokenMix => ({
+  input: u.input_tokens,
+  cacheRead: u.cache_read_input_tokens,
+  cacheWrite: u.cache_creation_input_tokens,
+  output: u.output_tokens,
+})
+
+export const mixTotal = (m: TokenMix): number => m.input + m.cacheRead + m.cacheWrite + m.output
+
+// The share of input the prompt cache served: high is cheap.
+export const cacheHit = (m: TokenMix): number => {
+  const input = m.input + m.cacheRead + m.cacheWrite
+  return input > 0 ? m.cacheRead / input : 0
+}
+
+// Books one reply: its tokens to the session, the active khata and its loop.
+export const bookTokens = (book: Book, usage: Usage, now: number, agentId?: string): Book => {
+  const mix = mixOf(usage)
+  const tokens = mixTotal(mix)
+  if (!(tokens > 0)) return book
+  const [b, khata] = activeKhata(book, now)
+  const total = b.tokens + tokens
+  const first: TokenSample[] = b.tokenSamples.length === 0 ? [{ at: now - 1, n: b.tokens }] : []
+  const tokenSamples = [...b.tokenSamples, ...first, { at: now, n: total }].filter(s => now - s.at <= SAMPLE_KEEP_MS).slice(-800)
+  const counted = withKhata(b, khata.id, k => ({ ...k, tokens: k.tokens + tokens }))
+  const byAgent = withAgent(counted, agentId, now, a => ({
+    ...a,
+    tokens: a.tokens + tokens,
+    mix: addMix(a.mix, mix),
+    steps: a.steps + 1,
+    model: usage.model ?? a.model,
+    lastAt: now,
+  }))
+  return { ...byAgent, tokens: total, tokenSamples, mix: addMix(b.mix, mix) }
 }
 
 // What was spent between t0 and t1. A cost reading only arrives with the next
-// tool call, so each delta is spread over the time it was really spent in;
-// a long think followed by one call is not a spike.
+// tool call or reply, so each delta is spread over the time it was really
+// spent in; a long think followed by one call is not a spike.
 export const spendBetween = (samples: readonly Sample[], t0: number, t1: number): number => {
   let spent = 0
   for (let i = 1; i < samples.length; i++) {
@@ -155,40 +277,57 @@ export const spendBetween = (samples: readonly Sample[], t0: number, t1: number)
 export const burnRate = (book: Book, now: number): number =>
   (spendBetween(book.samples, now - BURN_WINDOW_MS, now) / BURN_WINDOW_MS) * 60_000
 
-// Books the tokens one model request used to the active khata and the session.
-export const bookTokens = (book: Book, tokens: number, now: number): Book => {
-  if (!(tokens > 0)) return book
-  const [b, khata] = activeKhata(book, now)
-  const total = b.tokens + tokens
-  const first: TokenSample[] = b.tokenSamples.length === 0 ? [{ at: now - 1, n: b.tokens }] : []
-  const tokenSamples = [...b.tokenSamples, ...first, { at: now, n: total }].filter(s => now - s.at <= SAMPLE_KEEP_MS).slice(-800)
-  return { ...withKhata(b, khata.id, k => ({ ...k, tokens: k.tokens + tokens })), tokens: total, tokenSamples }
-}
-
-export const tokenRate = (book: Book, now: number): number => {
-  const asSamples: Sample[] = book.tokenSamples.map(s => ({ at: s.at, usd: s.n }))
-  return (spendBetween(asSamples, now - BURN_WINDOW_MS, now) / BURN_WINDOW_MS) * 60_000
-}
-
-export const setLimits = (book: Book, windows: readonly RateWindow[] | undefined): Book =>
-  windows === undefined || windows.length === 0
-    ? book
-    : { ...book, rateLimits: windows.map(w => ({ kind: w.kind, percentUsed: w.percentUsed, resetsAt: w.resetsAt })) }
-
-export const compactTokens = (n: number): string => {
-  if (n < 1_000) return String(Math.round(n))
-  if (n < 100_000) return `${(n / 1_000).toFixed(1)}k`
-  if (n < 1_000_000) return `${Math.round(n / 1_000)}k`
-  if (n < 100_000_000) return `${(n / 1_000_000).toFixed(2)}M`
-  return `${Math.round(n / 1_000_000)}M`
-}
-
 // The burn chart's columns, oldest first, each the spend rate in USD per minute.
 export const burnSeries = (book: Book, now: number, columns: number, bucketMs: number): number[] =>
   Array.from({ length: columns }, (_, i) => {
     const t1 = now - (columns - 1 - i) * bucketMs
     return (spendBetween(book.samples, t1 - bucketMs, t1) / bucketMs) * 60_000
   })
+
+export const tokenRate = (book: Book, now: number): number => {
+  const asSamples: Sample[] = book.tokenSamples.map(s => ({ at: s.at, usd: s.n }))
+  return (spendBetween(asSamples, now - BURN_WINDOW_MS, now) / BURN_WINDOW_MS) * 60_000
+}
+
+// ---- plan limits -----------------------------------------------------------
+
+export const setLimits = (book: Book, windows: readonly RateWindow[] | undefined, now?: number): Book => {
+  if (windows === undefined || windows.length === 0) return book
+  const rateLimits = windows.map(w => ({ kind: w.kind, percentUsed: w.percentUsed, resetsAt: w.resetsAt }))
+  if (now === undefined) return { ...book, rateLimits }
+  const limitSamples: Record<string, LimitSample[]> = { ...book.limitSamples }
+  for (const w of rateLimits) {
+    const kept = (limitSamples[w.kind] ?? []).filter(s => now - s.at <= RUNWAY_WINDOW_MS)
+    const last = kept[kept.length - 1]
+    // A window that reset starts its history over.
+    const fresh = last !== undefined && w.percentUsed < last.pct ? [] : kept
+    limitSamples[w.kind] = [...fresh, { at: now, pct: w.percentUsed }].slice(-200)
+  }
+  return { ...book, rateLimits, limitSamples }
+}
+
+export type Runway =
+  | { state: 'measuring' }
+  | { state: 'steady' }
+  | { state: 'lasts'; minutes: number }
+  | { state: 'runs-out'; minutes: number }
+
+// How long a plan window lasts at the pace of the last twenty minutes, set
+// against when it resets: whether this pace makes it to the reset or not.
+export const runway = (book: Book, kind: string, now: number): Runway => {
+  const window = book.rateLimits.find(w => w.kind === kind)
+  const samples = (book.limitSamples[kind] ?? []).filter(s => now - s.at <= RUNWAY_WINDOW_MS)
+  const first = samples[0]
+  const last = samples[samples.length - 1]
+  if (!window || !first || !last || last.at - first.at < 120_000) return { state: 'measuring' }
+  const perMin = ((last.pct - first.pct) / (last.at - first.at)) * 60_000
+  if (!(perMin > 0)) return { state: 'steady' }
+  const minutes = Math.max(0, (100 - window.percentUsed) / perMin)
+  const resetIn = window.resetsAt ? (Date.parse(window.resetsAt) - now) / 60_000 : Number.POSITIVE_INFINITY
+  return minutes < resetIn ? { state: 'runs-out', minutes } : { state: 'lasts', minutes }
+}
+
+// ---- describing calls ------------------------------------------------------
 
 // What identifies "the same action": the tool and its main argument, with
 // long digit runs (timestamps, ports, ids) folded so they don't hide a loop.
@@ -240,11 +379,22 @@ export const toolLabel = (tool: string): string => {
   return (names[tool] ?? (mcp?.[1] ?? tool)).slice(0, 6)
 }
 
-// The circuit breaker. Returns the book (a khata may be halted, a burn pause
-// started) and a verdict when the call must not run.
+// ---- the circuit breaker ---------------------------------------------------
+
+// Decides whether a call may run. Returns the book (a khata may be halted, a
+// burn pause started, a pass used up) and a verdict when the call must not run.
 export const check = (book: Book, fp: string, limits: Limits, now: number): [Book, Verdict | null] => {
   const [b, khata] = activeKhata(book, now)
-  const reopen = 'Leave this task: do not reopen it under another khata. Tell the user it hit its budget, then open a khata for the next task with the open_khata tool (load it with ToolSearch if it is not listed), or stop.'
+  const [decided, verdict] = decide(b, khata, fp, limits, now)
+  if (verdict === null || b.passes <= 0) return [decided, verdict]
+  // The person let one call through from the pane: this is it.
+  const streaks = { ...b.streaks }
+  delete streaks[khata.id]
+  return [{ ...b, passes: b.passes - 1, streaks, burnPausedUntil: now + BURN_PAUSE_MS }, null]
+}
+
+const decide = (b: Book, khata: Khata, fp: string, limits: Limits, now: number): [Book, Verdict | null] => {
+  const leave = 'Leave this task: do not reopen it under another khata. Tell the user it hit its budget, then open a khata for the next task with the open_khata tool (load it with ToolSearch if it is not listed), or stop.'
 
   const spent = sessionUsd(b)
   if (spent >= limits.sessionBudgetUsd) {
@@ -258,7 +408,7 @@ export const check = (book: Book, fp: string, limits: Limits, now: number): [Boo
     return [b, {
       kind: 'halted',
       short: `Khata "${khata.name}" is halted. Waiting for the next khata.`,
-      reason: `Khata "${khata.name}" is halted: ${khata.haltReason ?? 'over budget'}. ${reopen}`,
+      reason: `Khata "${khata.name}" is halted: ${khata.haltReason ?? 'over budget'}. ${leave}`,
     }]
   }
   if (khata.budgetUsd > 0 && khata.usd >= khata.budgetUsd) {
@@ -267,7 +417,7 @@ export const check = (book: Book, fp: string, limits: Limits, now: number): [Boo
     return [halted, {
       kind: 'budget',
       short: `"${khata.name}" spent ${why}. Halted.`,
-      reason: `Khata "${khata.name}" spent ${why} and is now halted. ${reopen}`,
+      reason: `Khata "${khata.name}" spent ${why} and is now halted. ${leave}`,
     }]
   }
   const streak = b.streaks[khata.id]
@@ -298,8 +448,53 @@ export const haltIfOver = (book: Book, now: number): Book => {
   if (!khata || khata.status !== 'open' || !(khata.budgetUsd > 0) || khata.usd < khata.budgetUsd) return book
   const why = `${money(khata.usd)} of its ${money(khata.budgetUsd)} budget`
   const halted = withKhata(book, khata.id, k => ({ ...k, status: 'halted', haltReason: `spent ${why}` }))
-  return addTrip(halted, { at: now, kind: 'budget', khata: khata.name, tool: 'reply', summary: 'the reply that crossed the budget', reason: `"${khata.name}" spent ${why}. Halted.` })
+  return addTrip(halted, {
+    at: now,
+    kind: 'budget',
+    khata: khata.name,
+    khataId: khata.id,
+    tool: 'reply',
+    summary: 'the reply that crossed the budget',
+    reason: `"${khata.name}" spent ${why}. Halted.`,
+  })
 }
+
+// ---- what the person can do from the pane ----------------------------------
+
+const resolveLatest = (book: Book, khataId: string | undefined, text: string): Book => {
+  const index = [...book.trips].reverse().findIndex(t => t.resolved === undefined && (khataId === undefined || t.khataId === khataId))
+  if (index < 0) return book
+  const at = book.trips.length - 1 - index
+  return { ...book, trips: book.trips.map((t, i) => (i === at ? { ...t, resolved: text } : t)) }
+}
+
+// Gives a khata more budget; a khata halted for its budget can carry on.
+export const raiseBudget = (book: Book, khataId: string, by: number): Book => {
+  const khata = book.khatas.find(k => k.id === khataId)
+  if (!khata) return book
+  const budgetUsd = Math.round((khata.budgetUsd + by) * 100) / 100
+  const lifted = withKhata(book, khataId, k => ({
+    ...k,
+    budgetUsd,
+    status: k.status === 'halted' ? (book.active === k.id ? 'open' : 'closed') : k.status,
+    haltReason: k.status === 'halted' ? undefined : k.haltReason,
+  }))
+  return resolveLatest(lifted, khataId, `budget raised to ${money(budgetUsd)} by you`)
+}
+
+// Lets the next call through whatever circuit stands in its way, once.
+export const allowOnce = (book: Book): Book =>
+  resolveLatest({ ...book, passes: book.passes + 1, burnPausedUntil: 0 }, undefined, 'one call allowed by you')
+
+// Stops the agent's work on a khata: its next call is told to move on.
+export const skipKhata = (book: Book, khataId: string): Book => {
+  const khata = book.khatas.find(k => k.id === khataId)
+  if (!khata || khata.id === GENERAL) return book
+  const halted = withKhata(book, khataId, k => ({ ...k, status: 'halted', haltReason: 'skipped by you' }))
+  return resolveLatest(halted, khataId, 'task skipped by you')
+}
+
+// ---- the tape --------------------------------------------------------------
 
 // Writes one entry into the bahi and keeps the khata's counters and loop streak.
 export const record = (book: Book, entry: Omit<Entry, 'khata'>, fp: string): Book => {
@@ -337,11 +532,30 @@ export const summary = (book: Book, startedAt: number): SessionSummary => ({
   khatas: book.khatas.map(k => ({ name: k.name, status: k.status, usd: k.usd, calls: k.calls })),
 })
 
+// ---- words and numbers -----------------------------------------------------
+
 export const duration = (ms: number): string => {
   if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`
   if (ms < 60_000) return `${Math.round(ms / 1000)}s`
   const m = Math.floor(ms / 60_000)
   return m < 60 ? `${m}m${String(Math.round((ms % 60_000) / 1000)).padStart(2, '0')}s` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`
+}
+
+export const span = (minutes: number): string => {
+  if (!Number.isFinite(minutes)) return 'never'
+  const m = Math.max(0, Math.round(minutes))
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h${String(m % 60).padStart(2, '0')}m`
+  return `${Math.floor(h / 24)}d${h % 24}h`
+}
+
+export const compactTokens = (n: number): string => {
+  if (n < 1_000) return String(Math.round(n))
+  if (n < 100_000) return `${(n / 1_000).toFixed(1)}k`
+  if (n < 1_000_000) return `${Math.round(n / 1_000)}k`
+  if (n < 100_000_000) return `${(n / 1_000_000).toFixed(2)}M`
+  return `${Math.round(n / 1_000_000)}M`
 }
 
 const stamp = (ms: number) => {
@@ -353,6 +567,8 @@ const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 8)
 const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ')
 const budgetText = (k: Khata) => (k.budgetUsd > 0 ? money(k.budgetUsd) : 'none')
 const khataName = (book: Book, id: string) => book.khatas.find(k => k.id === id)?.name ?? id
+const agentName = (book: Book, id: string | undefined) => book.agents.find(a => a.id === (id ?? MAIN))?.name ?? 'main'
+const pct = (x: number) => `${Math.round(x * 100)}%`
 
 const khataTable = (book: Book): string[] => [
   '| Khata | Status | Spent | Tokens | Budget | Calls | Fails | Blocked |',
@@ -360,19 +576,29 @@ const khataTable = (book: Book): string[] => [
   ...book.khatas.map(k => `| ${cell(k.name)} | ${k.status} | ${money(k.usd)} | ${compactTokens(k.tokens)} | ${budgetText(k)} | ${k.calls} | ${k.fails} | ${k.blocked} |`),
 ]
 
+const agentTable = (book: Book): string[] => [
+  '| Agent | Model | Steps | Calls | Tokens | Cost (est.) | Cache hit |',
+  '|---|---|--:|--:|--:|--:|--:|',
+  ...book.agents.map(a => `| ${cell(a.name)} | ${a.model ?? ''} | ${a.steps} | ${a.calls} | ${compactTokens(a.tokens)} | ${money(a.usd)} | ${pct(cacheHit(a.mix))} |`),
+]
+
 const windowName = (kind: string) =>
   kind === 'five_hour' ? '5 hour window' : kind === 'seven_day' ? 'Weekly window' : kind === 'spend_limit' ? 'Spend limit' : kind
 
-const limitLines = (book: Book): string[] =>
-  book.rateLimits.map(w => `| ${windowName(w.kind)} | ${Math.max(0, 100 - w.percentUsed).toFixed(0)}% left${w.resetsAt ? `, resets ${stamp(Date.parse(w.resetsAt))}` : ''} |`)
+const limitLines = (book: Book, now: number): string[] =>
+  book.rateLimits.map(w => {
+    const r = runway(book, w.kind, now)
+    const pace = r.state === 'runs-out' ? `, runs out in ${span(r.minutes)} at this pace` : r.state === 'lasts' ? ', lasts to its reset at this pace' : ''
+    return `| ${windowName(w.kind)} | ${Math.max(0, 100 - w.percentUsed).toFixed(0)}% left${w.resetsAt ? `, resets ${stamp(Date.parse(w.resetsAt))}` : ''}${pace} |`
+  })
 
 const tripTable = (book: Book): string[] =>
   book.trips.length === 0
     ? ['No circuit trips.']
     : [
-        '| Time | Circuit | Khata | Action | What happened |',
-        '|---|---|---|---|---|',
-        ...[...book.trips].reverse().map(t => `| ${clock(t.at)} | ${t.kind} | ${cell(t.khata)} | ${cell(`${t.tool}: ${t.summary}`)} | ${cell(t.reason)} |`),
+        '| Time | Circuit | Khata | Action | What happened | Resolved |',
+        '|---|---|---|---|---|---|',
+        ...[...book.trips].reverse().map(t => `| ${clock(t.at)} | ${t.kind} | ${cell(t.khata)} | ${cell(`${t.tool}: ${t.summary}`)} | ${cell(t.reason)} | ${cell(t.resolved ?? '')} |`),
       ]
 
 // The short report /munim statement prints.
@@ -382,10 +608,11 @@ export const statement = (book: Book, limits: Limits, past: readonly SessionSumm
     lines.push('Nothing booked yet in this session.')
   } else {
     lines.push(
-      `**Spent** ${money(sessionUsd(book))} of ${money(limits.sessionBudgetUsd)}  ·  **Tokens** ${compactTokens(book.tokens)}  ·  **Saved by the circuit breaker (est.)** ${money(book.saved)}  ·  **Circuit trips** ${book.trips.length}`,
+      `**Spent** ${money(sessionUsd(book))} of ${money(limits.sessionBudgetUsd)}  ·  **Tokens** ${compactTokens(book.tokens)} (cache hit ${pct(cacheHit(book.mix))})  ·  **Saved (est.)** ${money(book.saved)}  ·  **Circuit trips** ${book.trips.length}`,
       '',
       ...khataTable(book),
     )
+    if (book.agents.length > 1) lines.push('', '### Agents', '', ...agentTable(book))
     if (book.trips.length > 0) lines.push('', '### Circuit trips', '', ...tripTable(book).slice(0, 12))
   }
   if (past.length > 0) {
@@ -401,6 +628,7 @@ export const bahiMarkdown = (
   book: Book,
   meta: { startedAt: number; now: number; cwd?: string; limits: Limits },
 ): string => {
+  const m = book.mix
   const lines = [
     '# TokenMunim bahi',
     '',
@@ -412,9 +640,12 @@ export const bahiMarkdown = (
     '|---|--:|',
     `| Spent | ${money(sessionUsd(book))} of ${money(meta.limits.sessionBudgetUsd)} |`,
     `| Tokens | ${compactTokens(book.tokens)} |`,
-    ...limitLines(book),
+    `| Token mix | input ${compactTokens(m.input)}, cache read ${compactTokens(m.cacheRead)}, cache write ${compactTokens(m.cacheWrite)}, output ${compactTokens(m.output)} |`,
+    `| Cache hit | ${pct(cacheHit(m))} |`,
+    ...limitLines(book, meta.now),
     `| Saved by the circuit breaker (est.) | ${money(book.saved)} |`,
     `| Khatas | ${book.khatas.length} |`,
+    `| Agents | ${book.agents.length} |`,
     `| Tool calls | ${book.entries.filter(e => e.outcome !== 'blocked').length} |`,
     `| Circuit trips | ${book.trips.length} |`,
     '',
@@ -422,16 +653,20 @@ export const bahiMarkdown = (
     '',
     ...khataTable(book),
     '',
+    '## Agents',
+    '',
+    ...(book.agents.length > 0 ? agentTable(book) : ['No replies booked yet.']),
+    '',
     '## Circuit trips',
     '',
     ...tripTable(book),
     '',
     '## Tape',
     '',
-    '| Time | Khata | Tool | Action | Result | Took |',
-    '|---|---|---|---|---|--:|',
+    '| Time | Khata | Agent | Tool | Action | Result | Took |',
+    '|---|---|---|---|---|---|--:|',
     ...[...book.entries].reverse().map(e =>
-      `| ${clock(e.at)} | ${cell(khataName(book, e.khata))} | ${e.tool} | ${cell(e.summary)} | ${e.outcome === 'blocked' ? `blocked (${e.note ?? 'circuit'})` : e.outcome} | ${e.outcome === 'blocked' ? '' : duration(e.ms)} |`,
+      `| ${clock(e.at)} | ${cell(khataName(book, e.khata))} | ${cell(agentName(book, e.agent))} | ${e.tool} | ${cell(e.summary)} | ${e.outcome === 'blocked' ? `blocked (${e.note ?? 'circuit'})` : e.outcome} | ${e.outcome === 'blocked' ? '' : duration(e.ms)} |`,
     ),
     '',
   ]
