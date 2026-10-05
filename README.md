@@ -43,7 +43,7 @@ claude plugin marketplace add PiyushSinha-9/tokenmunim
 claude plugin install tokenmunim@tokenmunim
 ```
 
-Open a session and run `/munim`. In a terminal 144 columns or wider the pane docks beside the transcript on its own.
+The installer may say the four settings aren't set yet. They all have defaults, so you can skip that. Open a session and run `/munim`. In a terminal 144 columns or wider the pane docks beside the transcript on its own.
 
 ## Use it
 
