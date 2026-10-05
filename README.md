@@ -1,5 +1,7 @@
 # TokenMunim
 
+[![ci](https://github.com/PiyushSinha-9/tokenmunim/actions/workflows/ci.yml/badge.svg)](https://github.com/PiyushSinha-9/tokenmunim/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-E8B04B) ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.287%2B-D97757)
+
 **A munim for your AI agent.** TokenMunim is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that keeps a ledger of everything an agent does, books what it spends to the task it spent it on, and trips a circuit breaker when the agent starts wasting money.
 
 <p align="center">
