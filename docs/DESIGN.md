@@ -71,7 +71,8 @@ Each button on a circuit card is a pure function on the book, recorded on the tr
 
 * **Tabs.** Overview, Khatas, Tape, Trips and Agents. The overview is a dashboard; each other tab gives one list the full height.
 * **Fits any width.** The pane is laid out for the columns it actually has, in three tiers. As it narrows, the khata table drops its tokens column and then its calls column, the tape shortens its timestamps, tab labels lose their counts and then shorten, and every bar stretches or shrinks. Text is cut to fit, never padded past its frame. A test draws every tab at four widths on both surfaces.
-* **Fixed frames.** The overview fits itself to the pane's visible rows: it trims the khata list first, then folds the tape, the token mix and the burn chart, in that order, into one line summaries the person can unfold. No list ever grows past its frame, and older rows live in the bahi file.
+* **Fixed frames.** The overview fits itself to the pane's visible rows: it trims the khata list first, then folds the tape, the token mix and the burn chart, in that order, into one line summaries. No list ever grows past its frame, and older rows live in the bahi file.
+* **The person's choice wins.** The view remembers what the person folded and what they opened. The pane only ever folds sections the person has not opened, so a section they open stays open, and if they open more than fits, the pane scrolls. The first version folded a section straight back after it was opened whenever room was short, which made the fold arrows look dead; a test now clicks every section at four pane sizes.
 * **Color carries meaning only.** Gold is the ledger, green is healthy, amber is close, red is over. Everything else is muted.
 * **One source of truth.** The pane reads the same book the circuit breaker writes, so what you see is what the rules acted on.
 

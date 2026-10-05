@@ -98,7 +98,10 @@ export type Tab = 'overview' | 'khatas' | 'tape' | 'trips' | 'agents'
 // What the pane is showing: its own state, apart from the book it draws.
 export type View = {
   tab: Tab
+  // Sections the person folded, and sections they opened. Their choice
+  // always wins over the pane folding things itself to fit its height.
   folded: string[]
+  opened: string[]
   khata: string | null
   entry: number | null
 }

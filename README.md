@@ -56,7 +56,7 @@ A dashboard that docks beside the transcript.
 | **Agents** | The main agent and each subagent, with their model, steps, tokens, cost and cache hit rate |
 
 * **Act on a trip from the pane.** The circuit card has buttons: `+$0.50 budget` gives a halted khata more room, `Allow once` lets the next call through, `Skip task` moves the agent on. Each one is recorded on the trip.
-* **Fold any section** with its `▾` to a single summary line, and unfold it again.
+* **Fold any section** by clicking its title, to a single summary line, and click again to open it. A section you open stays open: when room runs short the pane folds the others, never yours. From the keyboard: `/munim fold tape`, `/munim unfold burn`.
 * **Fits any width.** Columns drop out in a fixed order as the pane narrows, tabs shorten, and bars stretch or shrink, so nothing wraps or spills.
 * **Never floods.** Every list sits in a fixed frame: the overview folds and trims itself to the pane's height, and older rows live in `bahi.md`.
 
@@ -88,6 +88,7 @@ Ask for khatas in your prompt:
 | `/munim statement` | Prints the session's statement |
 | `/munim bahi` | Writes the ledger file and opens it |
 | `/munim tab <name>` | Switches the pane to `overview`, `khatas`, `tape`, `trips` or `agents` |
+| `/munim fold <section>` | Folds `burn`, `mix`, `khatas` or `tape`; `/munim unfold <section>` opens it |
 | `/munim khata <name>` | Opens a khata by hand |
 | `/munim close` | Closes the open khata |
 | `/munim reset` | Clears this session's book |

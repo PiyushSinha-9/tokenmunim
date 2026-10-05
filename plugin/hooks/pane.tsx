@@ -29,7 +29,8 @@ export type Kit = { Box: any; Text: any; Button: any }
 
 export type PaneActions = {
   setTab: (tab: Tab) => void
-  toggle: (section: string) => void
+  // `isFolded` is how the section is drawn now, which may be the pane's own doing.
+  toggle: (section: string, isFolded: boolean) => void
   drill: (khataId: string | null) => void
   expand: (index: number | null) => void
   openBahi: () => void
@@ -48,7 +49,7 @@ export type PaneData = {
   hasFile: boolean
 }
 
-export const DEFAULT_VIEW: View = { tab: 'overview', folded: ['tape'], khata: null, entry: null }
+export const DEFAULT_VIEW: View = { tab: 'overview', folded: ['tape'], opened: [], khata: null, entry: null }
 
 // The palette: a ledger's gold on a quiet ground, color only where it means something.
 const GOLD = '#E8B04B'
@@ -154,9 +155,8 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
       `sec-${id}`,
       [
         <Box key={`sec-${id}-head`} justifyContent="space-between">
-          <Box>
-            {link(`fold-${id}`, isFolded ? '▸' : '▾', () => act.toggle(id))}
-            <Text bold color={GOLD}>{` ${title}`}</Text>
+          <Box key={`fold-${id}-box`}>
+            <Button key={`fold-${id}`} plain label={`${isFolded ? '▸' : '▾'} ${title}`} hover={{ color: GOLD, underline: true }} onPress={() => act.toggle(id, isFolded)} />
           </Box>
           <Text color={rightColor}>{cut(right, Math.max(0, C - title.length - 3))}</Text>
         </Box>,
@@ -552,8 +552,14 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     const khatasOpen = (count: number) => 4 + Math.max(1, count) + haltedRows(count) + (b.khatas.length > count ? 1 : 0)
     const tapeOpen = (count: number) => 3 + Math.max(1, count) + (b.entries.length > count ? 1 : 0)
 
-    // Fit: shrink the lists, then fold what the person can unfold again.
-    const shut = new Set(folded)
+    // Fit: shrink the lists, then fold what the person can unfold again, but
+    // never a section the person opened: their choice wins, and the pane
+    // scrolls if they open more than fits.
+    const opened = new Set(view.opened ?? [])
+    const shut = new Set([...folded].filter(id => !opened.has(id)))
+    const autoFold = (id: string) => {
+      if (!opened.has(id)) shut.add(id)
+    }
     let khataCount = Math.min(b.khatas.length, 8)
     let tapeCount = 4
     const sections = () =>
@@ -563,10 +569,9 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     const fits = () => fixed + sections() <= R
     while (!fits() && khataCount > 5) khataCount -= 1
     while (!fits() && tapeCount > 2 && !shut.has('tape')) tapeCount -= 1
-    if (!fits()) shut.add('tape')
-    if (!fits()) shut.add('mix')
+    for (const id of ['tape', 'mix']) if (!fits()) autoFold(id)
     while (!fits() && khataCount > 3) khataCount -= 1
-    if (!fits()) shut.add('burn')
+    for (const id of ['burn', 'khatas']) if (!fits()) autoFold(id)
     const gapCount = 6 + (trip ? 1 : 0)
     const gap = R - fixed - sections() >= gapCount ? 1 : 0
 
@@ -768,4 +773,12 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
       {body}
     </Box>
   )
+}
+
+// Folds or opens a section from how it is drawn now: a section the pane folded
+// to fit opens on the first press, and stays open.
+export const toggleSection = (view: View, id: string, isFolded: boolean): View => {
+  const folded = view.folded.filter(x => x !== id)
+  const opened = (view.opened ?? []).filter(x => x !== id)
+  return isFolded ? { ...view, folded, opened: [...opened, id] } : { ...view, folded: [...folded, id], opened }
 }

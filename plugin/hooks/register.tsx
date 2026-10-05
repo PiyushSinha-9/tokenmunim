@@ -32,7 +32,7 @@ import {
   toolLabel,
 } from './ledger'
 import type { Limits, Usage } from './ledger'
-import { DEFAULT_VIEW, drawPane } from './pane'
+import { DEFAULT_VIEW, drawPane, toggleSection } from './pane'
 
 const PANE = 'tokenmunim'
 const OWN = 'mcp__tokenmunim__'
@@ -40,6 +40,7 @@ const OWN = 'mcp__tokenmunim__'
 const EXEMPT = new Set(['ToolSearch'])
 const BAHI_KEY = 'bahi'
 const TABS: readonly Tab[] = ['overview', 'khatas', 'tape', 'trips', 'agents']
+const SECTIONS: readonly string[] = ['burn', 'mix', 'khatas', 'tape']
 const book = atom({ plugin: 'tokenmunim', key: 'book' } as const, emptyBook())
 const view = atom({ plugin: 'tokenmunim', key: 'view' } as const, DEFAULT_VIEW)
 
@@ -173,8 +174,8 @@ export const register: Register = (on, options) => {
     })
     await $.command.register({
       name: 'munim',
-      description: 'TokenMunim: open the pane, or statement, bahi, tab <name>, khata <name>, close, reset',
-      argumentHint: 'statement | bahi | tab <overview|khatas|tape|trips|agents> | khata <name> | close | reset',
+      description: 'TokenMunim: open the pane, or statement, bahi, tab <name>, fold or unfold <section>, khata <name>, close, reset',
+      argumentHint: 'statement | bahi | tab <name> | fold <section> | unfold <section> | khata <name> | close | reset',
     })
     await locate($)
     // A status line left by an earlier load is stale; the alarm starts quiet.
@@ -304,6 +305,13 @@ export const register: Register = (on, options) => {
       await $.ui.open({ id: PANE, title: 'TokenMunim' })
       return { text: `TokenMunim is showing ${tab}.` }
     }
+    if (verb === 'fold' || verb === 'unfold') {
+      const id = (rest[0] ?? '').toLowerCase()
+      if (!SECTIONS.includes(id)) return { text: `Sections: ${SECTIONS.join(', ')}.` }
+      await update($, view, cur => toggleSection({ ...DEFAULT_VIEW, ...cur }, id, verb === 'unfold'))
+      await $.ui.open({ id: PANE, title: 'TokenMunim' })
+      return { text: `${verb === 'fold' ? 'Folded' : 'Opened'} ${id}.` }
+    }
     if (verb === 'khata') {
       const name = rest.join(' ').trim() || 'task'
       const usd = await costNow($)
@@ -335,7 +343,7 @@ export const register: Register = (on, options) => {
     const saved = ((await $.store.get(BAHI_KEY)) as SessionSummary[] | undefined) ?? []
     const file = await writeBahi($)
     if (verb === 'statement') return { text: statement(b, limits, saved.filter(s => s.startedAt !== usage.startedAt), file) }
-    return { text: `Unknown option "${verb}". Try: statement, bahi, tab <name>, khata <name>, close, reset.` }
+    return { text: `Unknown option "${verb}". Try: statement, bahi, tab <name>, fold <section>, unfold <section>, khata <name>, close, reset.` }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -351,11 +359,7 @@ export const register: Register = (on, options) => {
       { book: b, view: v, now, limits, width: e.props.bodyColumns, rows, hasFile: bahiFile !== undefined },
       {
         setTab: tab => void update($, view, cur => ({ ...DEFAULT_VIEW, ...cur, tab, entry: null })),
-        toggle: id =>
-          void update($, view, cur => {
-            const base = { ...DEFAULT_VIEW, ...cur }
-            return { ...base, folded: base.folded.includes(id) ? base.folded.filter(x => x !== id) : [...base.folded, id] }
-          }),
+        toggle: (id, isFolded) => void update($, view, cur => toggleSection({ ...DEFAULT_VIEW, ...cur }, id, isFolded)),
         drill: khata => void update($, view, cur => ({ ...DEFAULT_VIEW, ...cur, khata, tab: khata === null ? cur.tab : 'tape', entry: null })),
         expand: entry => void update($, view, cur => ({ ...DEFAULT_VIEW, ...cur, entry })),
         openBahi: () => void openBahi($),

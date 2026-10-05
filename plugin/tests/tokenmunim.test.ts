@@ -308,7 +308,7 @@ test('the overview draws the khatas, a halted khata and the circuit card on ever
     expect(await ui.find({ type: 'Text', text: /iron condor/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /halted/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /CIRCUIT TRIPPED/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /TOKEN MIX/ })).toBeDefined()
+    expect(await ui.find({ key: 'fold-mix' })).toBeDefined()
     await ui.unmount()
   }
 })
@@ -328,17 +328,6 @@ test('tabs switch the view, and a khata opens its own tape', async ($, on) => {
     await ui.press({ key: 'tab-btn-overview' })
     await ui.unmount()
   }
-})
-
-test('a section folds to one line and unfolds again', async ($, on) => {
-  await busySession($ as never, on)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /m ago/ })).toBeDefined()
-  await ui.press({ key: 'fold-burn' })
-  expect(await ui.find({ type: 'Text', text: /m ago/ })).toBeUndefined()
-  await ui.press({ key: 'fold-burn' })
-  expect(await ui.find({ type: 'Text', text: /m ago/ })).toBeDefined()
-  await ui.unmount()
 })
 
 test('the circuit card raises a budget, and the halted khata carries on', async ($, on) => {
@@ -377,4 +366,130 @@ test('every tab draws at narrow, medium and wide widths on every surface', async
       await ui.unmount()
     }
   }
+})
+
+// ---- clicking through the pane, the way a person does ---------------------------
+
+// Eight khatas, a budget trip on the last one, and a tape long enough to trim.
+async function crowdedSession($: Parameters<Parameters<typeof test>[1]>[0], on: On) {
+  const { clock, state } = world(on)
+  for (let i = 1; i <= 7; i++) {
+    await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: `strategy ${i}`, budget_usd: 5 })
+    await $.tool.call({ tool: 'Bash', command: `python run.py ${i}`, description: `Backtest strategy ${i}` })
+    state.usd += 0.02
+    await clock.advance(5_000)
+  }
+  await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'strategy 8', budget_usd: 0.05 })
+  await $.tool.call({ tool: 'Bash', command: 'python run.py 8', description: 'Backtest strategy 8' })
+  state.usd += 0.2
+  await clock.advance(5_000)
+  const blocked = await $.tool.call({ tool: 'Bash', command: 'python run.py 8 --adjust', description: 'Adjust strategy 8' })
+  expect(denied(blocked)).toBe(true)
+  return { clock, state }
+}
+
+const at = (surface: 'terminal' | 'desktop', columns: number, rows: number) => ({
+  ...PANE,
+  surface,
+  props: { ...(PANE.props as object), bodyColumns: columns, scroll: { offset: 0, bodyRows: rows } } as never,
+})
+
+// What each section shows only while it is open.
+const BODY: Record<string, RegExp> = { burn: /m ago$/, mix: /No replies booked yet|cache read/, khatas: /USED/, tape: /Backtest strategy 8/ }
+
+test('every section opens and folds on the first press, even one the pane folded to fit', async ($, on) => {
+  await crowdedSession($ as never, on)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const [columns, rows] of [[66, 30], [66, 38], [66, 60], [46, 34]] as const) {
+      const ui = await $.ui.mount(at(surface, columns, rows))
+      for (const id of ['burn', 'mix', 'khatas', 'tape']) {
+        for (let press = 0; press < 2; press++) {
+          const label = String((await ui.find({ key: `fold-${id}` }))?.props.label ?? '')
+          const wasFolded = label.startsWith('▸')
+          expect((await ui.find({ type: 'Text', text: BODY[id] })) !== undefined).toBe(!wasFolded)
+          await ui.press({ key: `fold-${id}` })
+          const now = String((await ui.find({ key: `fold-${id}` }))?.props.label ?? '')
+          expect(now.startsWith(wasFolded ? '▾' : '▸')).toBe(true)
+          expect((await ui.find({ type: 'Text', text: BODY[id] })) !== undefined).toBe(wasFolded)
+        }
+      }
+      await ui.unmount()
+    }
+  }
+})
+
+test('a section the person opened stays open when the pane is short of room', async ($, on) => {
+  await crowdedSession($ as never, on)
+  const ui = await $.ui.mount(at('terminal', 66, 30))
+  const tapeLabel = String((await ui.find({ key: 'fold-tape' }))?.props.label ?? '')
+  expect(tapeLabel.startsWith('▸')).toBe(true)
+  await ui.press({ key: 'fold-tape' })
+  expect(await ui.find({ type: 'Text', text: BODY.tape })).toBeDefined()
+  await ui.unmount()
+  // Drawn again, as after the next tool call: still open.
+  const again = await $.ui.mount(at('terminal', 66, 30))
+  expect(await again.find({ type: 'Text', text: BODY.tape })).toBeDefined()
+  await again.unmount()
+})
+
+test('each tab shows its own content on every surface', async ($, on) => {
+  await crowdedSession($ as never, on)
+  const only: Record<string, RegExp> = { khatas: /^total$/, tape: /newest first/, agents: /tokens exact/, overview: /COST\/MIN/ }
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount(at(surface, 66, 44))
+    for (const tab of ['khatas', 'tape', 'trips', 'agents', 'overview']) {
+      await ui.press({ key: `tab-btn-${tab}` })
+      const label = String((await ui.find({ key: `tab-btn-${tab}` }))?.props.dimColor ?? false)
+      expect(label).toBe('false')
+      for (const [other, mark] of Object.entries(only)) {
+        expect((await ui.find({ type: 'Text', text: mark })) !== undefined).toBe(other === tab)
+      }
+      if (tab === 'trips') expect(await ui.find({ type: 'Text', text: /CIRCUIT/ })).toBeDefined()
+    }
+    await ui.unmount()
+  }
+})
+
+test('a khata opens its own tape, and show all brings the rest back', async ($, on) => {
+  await crowdedSession($ as never, on)
+  const ui = await $.ui.mount(at('terminal', 66, 44))
+  await ui.press({ key: 'tab-btn-khatas' })
+  await ui.press({ key: 'drill-strategy-3-3' })
+  expect(await ui.find({ type: 'Text', text: /newest first/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Backtest strategy 3/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Backtest strategy 4/ })).toBeUndefined()
+  await ui.press({ key: 'clear-filter' })
+  expect(await ui.find({ type: 'Text', text: /Backtest strategy 4/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a call on the tape opens its details and closes again', async ($, on) => {
+  await crowdedSession($ as never, on)
+  const ui = await $.ui.mount(at('terminal', 66, 44))
+  await ui.press({ key: 'tab-btn-tape' })
+  expect(await ui.find({ type: 'Text', text: /blocked by the budget circuit/ })).toBeUndefined()
+  await ui.press({ key: 'open-8' })
+  expect(await ui.find({ type: 'Text', text: /blocked by the budget circuit/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /strategy 8/ })).toBeDefined()
+  await ui.press({ key: 'open-8' })
+  expect(await ui.find({ type: 'Text', text: /blocked by the budget circuit/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('skip task on a loop halts the khata and the agent is told to move on', async ($, on) => {
+  const { clock, state } = world(on)
+  await $.tool.call({ tool: 'mcp__tokenmunim__open_khata', name: 'chain data', budget_usd: 5 })
+  state.failing = true
+  for (let i = 0; i < 3; i++) {
+    await $.tool.call({ tool: 'Bash', command: 'python fetch.py' })
+    await clock.advance(1_000)
+  }
+  expect(denied(await $.tool.call({ tool: 'Bash', command: 'python fetch.py' }))).toBe(true)
+  const ui = await $.ui.mount(at('terminal', 66, 44))
+  await ui.press({ key: 'trip-latest-skip-btn' })
+  expect(await ui.find({ type: 'Text', text: /task skipped by you/ })).toBeDefined()
+  state.failing = false
+  const next = await $.tool.call({ tool: 'Bash', command: 'python other.py' })
+  expect(JSON.stringify(next)).toContain('skipped by you')
+  await ui.unmount()
 })
