@@ -439,8 +439,7 @@ test('each tab shows its own content on every surface', async ($, on) => {
     const ui = await $.ui.mount(at(surface, 66, 44))
     for (const tab of ['khatas', 'tape', 'trips', 'agents', 'overview']) {
       await ui.press({ key: `tab-btn-${tab}` })
-      const label = String((await ui.find({ key: `tab-btn-${tab}` }))?.props.dimColor ?? false)
-      expect(label).toBe('false')
+      expect(await ui.find({ key: `tab-btn-${tab}` })).toBeUndefined()
       for (const [other, mark] of Object.entries(only)) {
         expect((await ui.find({ type: 'Text', text: mark })) !== undefined).toBe(other === tab)
       }

@@ -285,6 +285,15 @@ export const burnSeries = (book: Book, now: number, columns: number, bucketMs: n
     return (spendBetween(book.samples, t1 - bucketMs, t1) / bucketMs) * 60_000
   })
 
+// Tokens per minute, column by column, for the token sparkline.
+export const tokenSeries = (book: Book, now: number, columns: number, bucketMs: number): number[] => {
+  const asSamples: Sample[] = book.tokenSamples.map(s => ({ at: s.at, usd: s.n }))
+  return Array.from({ length: columns }, (_, i) => {
+    const t1 = now - (columns - 1 - i) * bucketMs
+    return (spendBetween(asSamples, t1 - bucketMs, t1) / bucketMs) * 60_000
+  })
+}
+
 export const tokenRate = (book: Book, now: number): number => {
   const asSamples: Sample[] = book.tokenSamples.map(s => ({ at: s.at, usd: s.n }))
   return (spendBetween(asSamples, now - BURN_WINDOW_MS, now) / BURN_WINDOW_MS) * 60_000

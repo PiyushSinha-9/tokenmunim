@@ -42,3 +42,45 @@ export const chartRows = (
   }
   return { rows, scale, limitRow }
 }
+
+// Braille charts: each cell is two dots wide and four tall, so a chart gets
+// twice the columns and four times the rows of a block chart in the same
+// space. A cell is filled from the bottom up to each of its two samples.
+const DOTS = [
+  [0x01, 0x02, 0x04, 0x40],
+  [0x08, 0x10, 0x20, 0x80],
+] as const
+
+export type Cell = { char: string | null; value: number }
+
+export const brailleArea = (series: readonly number[], height: number, scale: number): Cell[][] => {
+  const levels = height * 4
+  const top = Math.max(scale, 1e-9)
+  const level = series.map(v => (v > 0 ? Math.max(1, Math.min(levels, Math.round((v / top) * levels))) : 0))
+  const width = Math.ceil(series.length / 2)
+  const rows: Cell[][] = []
+  for (let r = 0; r < height; r++) {
+    const cells: Cell[] = []
+    for (let c = 0; c < width; c++) {
+      let bits = 0
+      for (let side = 0; side < 2; side++) {
+        const l = level[2 * c + side] ?? 0
+        for (let d = 0; d < 4; d++) {
+          const fromBottom = (height - 1 - r) * 4 + (3 - d) + 1
+          if (l >= fromBottom) bits |= DOTS[side]![d]!
+        }
+      }
+      const value = Math.max(series[2 * c] ?? 0, series[2 * c + 1] ?? 0)
+      cells.push({ char: bits === 0 ? null : String.fromCharCode(0x2800 + bits), value })
+    }
+    rows.push(cells)
+  }
+  return rows
+}
+
+// A one line braille sparkline, scaled to its own peak.
+export const sparkline = (series: readonly number[]): string => {
+  const peak = Math.max(0, ...series)
+  const [row] = brailleArea(series, 1, peak)
+  return (row ?? []).map(c => c.char ?? '⣀').join('')
+}

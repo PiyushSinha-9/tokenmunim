@@ -248,6 +248,9 @@ export const register: Register = (on, options) => {
         const cur = normalize(b)
         const khata = cur.khatas.find(k => k.id === cur.active)
         const blocked = record(cur, { ...base, ms: 0, outcome: 'blocked', note: stop.kind }, fp)
+        // A khata that stays halted is one trip, not one per call that bumps into it.
+        const last = cur.trips[cur.trips.length - 1]
+        if (stop.kind === 'halted' && last !== undefined && last.khataId === khata?.id && last.resolved === undefined) return blocked
         return addTrip(blocked, {
           at: startedAtMs,
           kind: stop.kind,
@@ -356,7 +359,7 @@ export const register: Register = (on, options) => {
     const rows = e.props.scroll?.bodyRows ?? (e.viewport?.rows ?? 50) - 6
     return drawPane(
       kit,
-      { book: b, view: v, now, limits, width: e.props.bodyColumns, rows, hasFile: bahiFile !== undefined },
+      { book: b, view: v, now, limits, width: e.props.bodyColumns, rows, hasFile: bahiFile !== undefined, startedAt },
       {
         setTab: tab => void update($, view, cur => ({ ...DEFAULT_VIEW, ...cur, tab, entry: null })),
         toggle: (id, isFolded) => void update($, view, cur => toggleSection({ ...DEFAULT_VIEW, ...cur }, id, isFolded)),
