@@ -556,3 +556,62 @@ test('every number on screen is a fact: calls stopped, not money saved', async (
   expect(await ui.find({ type: 'Text', text: /SAVED/ })).toBeUndefined()
   await ui.unmount()
 })
+
+// ---- the bar above the prompt ----------------------------------------------------
+
+const BAND = {
+  plugin: 'tokenmunim',
+  component: 'AbovePrompt' as const,
+  props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 150, scroll: { offset: 0, bodyRows: 4 } } as never,
+  viewport: { columns: 155, rows: 50 },
+}
+
+// Panes as the engine keeps them: opened and closed by id.
+function panes(on: On) {
+  const open = new Set<string>()
+  on('ui.open', async (_$, e) => {
+    open.add(e.id)
+    return { value: { isPlaced: true } as never }
+  })
+  on('ui.close', async (_$, e) => {
+    open.delete(e.id)
+    return { value: undefined as never }
+  })
+  on('ui.panes', async () => ({ value: [...open].map(id => ({ id, title: 'TokenMunim', isShown: true, isFocused: false, isPlaced: true })) as never }))
+  // The engine's own band, empty: what shows when TokenMunim's bar is off.
+  on('ui.render', { component: 'AbovePrompt' }, async () => h('Box', {}) as never)
+  return open
+}
+
+test('the bar stays hidden until /munim, and its button opens and closes the dashboard', async ($, on) => {
+  world(on)
+  const open = panes(on)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...BAND, surface })
+    expect(await ui.find({ type: 'Text', text: /^Munim$/ })).toBeUndefined()
+    await ui.unmount()
+  }
+  await $.command.run({ command: 'munim', args: '' })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^Munim$/ })).toBeDefined()
+  expect(String((await ui.find({ key: 'bar-toggle' }))?.props.label)).toContain('Open')
+  await ui.press({ key: 'bar-toggle' })
+  expect(open.has('tokenmunim')).toBe(true)
+  expect(String((await ui.find({ key: 'bar-toggle' }))?.props.label)).toContain('Close')
+  await ui.press({ key: 'bar-toggle' })
+  expect(open.has('tokenmunim')).toBe(false)
+  expect(String((await ui.find({ key: 'bar-toggle' }))?.props.label)).toContain('Open')
+  await $.command.run({ command: 'munim', args: 'off' })
+  expect(await ui.find({ type: 'Text', text: /^Munim$/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the bar shows what needs attention as a badge', async ($, on) => {
+  panes(on)
+  await crowdedSession($ as never, on)
+  await $.command.run({ command: 'munim', args: '' })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /1 new/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /stopped/ })).toBeDefined()
+  await ui.unmount()
+})

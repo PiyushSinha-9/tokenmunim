@@ -73,7 +73,9 @@ claude plugin marketplace add PiyushSinha-9/tokenmunim
 claude plugin install tokenmunim@tokenmunim
 ```
 
-The installer may say the four settings aren't set yet. They all have defaults, so you can skip that. Open a session and run `/munim`. In a terminal 144 columns or wider, the pane docks beside the transcript on its own.
+The installer may say the settings aren't set yet. They all have defaults, so you can skip that.
+
+TokenMunim protects every session from the start, in the background, and shows nothing until you ask. Run `/munim` and a slim bar appears above the prompt, for that session only: your spend, cost per minute, calls stopped, a red badge when something needs you, and a button that opens the dashboard and closes it again.
 
 ## Use it
 
@@ -83,7 +85,9 @@ Ask for tasks in your prompt:
 
 | Command | What it does |
 |---|---|
-| `/munim` | Opens the pane |
+| `/munim` | Shows TokenMunim's bar above the prompt, for this session |
+| `/munim open` / `/munim close` | Opens or closes the dashboard, like the bar's button |
+| `/munim off` | Hides the bar and the dashboard; protection carries on |
 | `/munim statement` | Prints the session's statement |
 | `/munim ledger` | Writes the ledger file and opens it |
 | `/munim tab <name>` | Switches to `overview`, `tasks`, `activity`, `alerts` or `agents` |
@@ -104,6 +108,7 @@ Change them in `/plugin`, under TokenMunim's configuration.
 | Session budget | $20 | Every call is blocked once the session spends this much |
 | Loop limit | 3 | Identical failures before a retry is blocked |
 | Burn limit | $2 a minute | Measured over two minutes; pauses the agent once |
+| Open the dashboard when a session starts | Off | Turn it on to see the dashboard without running `/munim` |
 
 ## What it costs
 

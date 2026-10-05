@@ -472,6 +472,23 @@ const decide = (b: Book, task: Task, fp: string, limits: Limits, now: number): [
 
 export const addTrip = (book: Book, trip: Trip): Book => ({ ...book, trips: [...book.trips, trip].slice(-MAX_TRIPS) })
 
+// An alert still worth the person's attention: unresolved, and either recent
+// or about a task that is still halted.
+export const isPending = (book: Book, trip: Trip, now: number): boolean => {
+  if (trip.resolved !== undefined) return false
+  const task = book.tasks.find(t => t.id === trip.taskId) ?? book.tasks.find(t => t.name === trip.task)
+  return now - trip.at < 10 * 60_000 || task?.status === 'halted'
+}
+
+// How many things need the person: each halted task once, plus each recent loop or burn.
+export const pendingCount = (book: Book, now: number): number =>
+  new Set(
+    book.trips
+      .map((t, i) => ({ t, i }))
+      .filter(({ t }) => isPending(book, t, now))
+      .map(({ t, i }) => (t.kind === 'budget' || t.kind === 'halted' ? `task:${t.taskId ?? t.task}` : `alert:${i}`)),
+  ).size
+
 // A reply can carry a task past its budget between two tool calls. Halt it
 // then, so the very next call is stopped and the overspend shows as a trip.
 export const haltIfOver = (book: Book, now: number): Book => {

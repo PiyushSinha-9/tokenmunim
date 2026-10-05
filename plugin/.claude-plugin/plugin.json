@@ -1,6 +1,6 @@
 {
   "name": "tokenmunim",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "description": "Cost control for AI agents: a budget per task, a live ledger of every step, and a circuit breaker that stops loops, burn spikes and runaway spend.",
   "author": {
     "name": "Piyush Sinha",
@@ -44,6 +44,12 @@
       "title": "Burn limit (USD per minute)",
       "description": "Spending faster than this over two minutes pauses the agent once with a warning.",
       "default": 2
+    },
+    "openOnStart": {
+      "type": "boolean",
+      "title": "Open the dashboard when a session starts",
+      "description": "Off by default: TokenMunim protects every session in the background and shows nothing until you run /munim.",
+      "default": false
     }
   }
 }

@@ -32,7 +32,7 @@ import {
   toolLabel,
 } from './ledger'
 import type { Limits, Usage } from './ledger'
-import { DEFAULT_VIEW, drawPane, migrateView, toggleSection } from './pane'
+import { DEFAULT_VIEW, drawBar, drawPane, migrateView, toggleSection } from './pane'
 
 const PANE = 'tokenmunim'
 const OWN = 'mcp__tokenmunim__'
@@ -43,6 +43,7 @@ const TABS: readonly Tab[] = ['overview', 'tasks', 'activity', 'alerts', 'agents
 const SECTIONS: readonly string[] = ['burn', 'mix', 'tasks', 'activity', 'alerts']
 const book = atom({ plugin: 'tokenmunim', key: 'book' } as const, emptyBook())
 const view = atom({ plugin: 'tokenmunim', key: 'view' } as const, DEFAULT_VIEW)
+const bar = atom({ plugin: 'tokenmunim', key: 'bar' } as const, { shown: false, open: false })
 
 const fileStamp = (ms: number) => {
   const d = new Date(ms)
@@ -126,6 +127,28 @@ async function noteStep($: EngineInterface, usage: Usage, agentId: string | unde
   }
 }
 
+// Opens or closes the dashboard. The bar shows whenever the dashboard has been
+// asked for, and its button follows the pane, however the pane was closed.
+async function setPane($: EngineInterface, open: boolean) {
+  try {
+    if (open) await $.ui.open({ id: PANE, title: 'TokenMunim' })
+    else await $.ui.close({ id: PANE })
+  } catch {
+    // A surface with no panes: the bar and the ledger still work.
+  }
+  await update($, bar, () => ({ shown: true, open }))
+}
+
+async function togglePane($: EngineInterface) {
+  let isOpen = (await read($, bar)).open
+  try {
+    isOpen = (await $.ui.panes()).some(p => p.id === PANE)
+  } catch {
+    // Fall back to what the bar last knew.
+  }
+  await setPane($, !isOpen)
+}
+
 // The status line is an alarm, not a ticker: it shows while a circuit is tripped.
 function alarm($: EngineInterface, text: string | undefined) {
   if (text === undefined && !isAlerting) return
@@ -153,6 +176,7 @@ async function decide($: EngineInterface, kind: 'raise' | 'allow' | 'skip', task
 
 export const register: Register = (on, options) => {
   limits = limitsFrom(options)
+  const openOnStart = options.openOnStart === true
 
   on('session.start', async ($, e, next) => {
     await $.tool.register({
@@ -174,13 +198,14 @@ export const register: Register = (on, options) => {
     })
     await $.command.register({
       name: 'munim',
-      description: 'TokenMunim: open the pane, or statement, ledger, tab <name>, fold or unfold <section>, task <name>, end, reset',
-      argumentHint: 'statement | ledger | tab <name> | fold <section> | unfold <section> | task <name> | end | reset',
+      description: 'TokenMunim: show its bar for this session, or open, close, off, statement, ledger, tab, fold, unfold, task, end, reset',
+      argumentHint: 'open | close | off | statement | ledger | tab <name> | fold <section> | unfold <section> | task <name> | end | reset',
     })
     await locate($)
     // A status line left by an earlier load is stale; the alarm starts quiet.
     $.ui.status(undefined)
-    void $.ui.open({ id: PANE, title: 'TokenMunim' })
+    // Nothing shows until the person asks for it, unless they set it to open.
+    if (openOnStart) await setPane($, true)
     return next(e)
   })
 
@@ -297,22 +322,35 @@ export const register: Register = (on, options) => {
     const [verb = '', ...rest] = e.args.trim().split(/\s+/)
     const now = await $.clock.now()
 
-    if (verb === '' || verb === 'pane') {
-      await $.ui.open({ id: PANE, title: 'TokenMunim' })
-      return { text: 'TokenMunim pane is open.' }
+    if (verb === '' || verb === 'bar') {
+      await update($, bar, cur => ({ ...cur, shown: true }))
+      return { text: 'TokenMunim is on for this session. Click Open in the bar above the prompt to see the dashboard, or run /munim open.' }
+    }
+    if (verb === 'open' || verb === 'pane') {
+      await setPane($, true)
+      return { text: 'TokenMunim dashboard is open.' }
+    }
+    if (verb === 'close') {
+      await setPane($, false)
+      return { text: 'TokenMunim dashboard is closed. The bar stays; click Open to bring it back.' }
+    }
+    if (verb === 'off') {
+      await setPane($, false)
+      await update($, bar, () => ({ shown: false, open: false }))
+      return { text: 'TokenMunim is out of sight for this session, and still protecting it. Run /munim to bring the bar back.' }
     }
     if (verb === 'tab') {
       const tab = TABS.find(t => t === (rest[0] ?? '').toLowerCase())
       if (tab === undefined) return { text: `Tabs: ${TABS.join(', ')}.` }
       await update($, view, cur => ({ ...migrateView(cur), tab, entry: null }))
-      await $.ui.open({ id: PANE, title: 'TokenMunim' })
+      await setPane($, true)
       return { text: `TokenMunim is showing ${tab}.` }
     }
     if (verb === 'fold' || verb === 'unfold') {
       const id = (rest[0] ?? '').toLowerCase()
       if (!SECTIONS.includes(id)) return { text: `Sections: ${SECTIONS.join(', ')}.` }
       await update($, view, cur => toggleSection({ ...migrateView(cur) }, id, verb === 'unfold'))
-      await $.ui.open({ id: PANE, title: 'TokenMunim' })
+      await setPane($, true)
       return { text: `${verb === 'fold' ? 'Folded' : 'Opened'} ${id}.` }
     }
     if (verb === 'task') {
@@ -323,7 +361,7 @@ export const register: Register = (on, options) => {
       await writeLedger($)
       return { text: `Task "${name}" started with a budget of ${money(limits.taskBudgetUsd)}.` }
     }
-    if (verb === 'end' || verb === 'close') {
+    if (verb === 'end') {
       await update($, book, b => endTask(normalize(b)))
       await writeLedger($)
       return { text: 'Task ended.' }
@@ -334,7 +372,7 @@ export const register: Register = (on, options) => {
       alarm($, undefined)
       return { text: 'TokenMunim book reset for this session.' }
     }
-    if (verb === 'ledger' || verb === 'export' || verb === 'open') {
+    if (verb === 'ledger' || verb === 'export') {
       const file = await writeLedger($)
       if (file === undefined) return { text: 'The ledger file could not be written here.' }
       if (verb !== 'export') await $.process.run(['open', file])
@@ -346,7 +384,21 @@ export const register: Register = (on, options) => {
     const saved = ((await $.store.get(HISTORY_KEY)) as SessionSummary[] | undefined) ?? []
     const file = await writeLedger($)
     if (verb === 'statement') return { text: statement(b, limits, saved.filter(s => s.startedAt !== usage.startedAt), file) }
-    return { text: `Unknown option "${verb}". Try: statement, ledger, tab <name>, fold <section>, unfold <section>, task <name>, end, reset.` }
+    return { text: `Unknown option "${verb}". Try: open, close, off, statement, ledger, tab <name>, fold <section>, unfold <section>, task <name>, end, reset.` }
+  })
+
+  on('ui.close', async ($, e, next) => {
+    const done = await next(e)
+    if (e.id === PANE) await update($, bar, cur => ({ ...cur, open: false }))
+    return done
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const shown = await read($, bar)
+    if (!shown.shown || e.props.hasSurvey) return next(e)
+    const b = normalize(await read($, book))
+    const now = await $.clock.now()
+    return drawBar($.ui.resolve(e), { book: b, now, limits, width: e.props.bodyColumns, isOpen: shown.open }, () => void togglePane($))
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

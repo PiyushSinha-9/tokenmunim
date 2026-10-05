@@ -16,8 +16,10 @@ import {
   duration,
   GENERAL,
   MAIN,
+  isPending,
   mixTotal,
   money,
+  pendingCount,
   runway,
   sessionUsd,
   span,
@@ -142,8 +144,6 @@ const wrap = (text: string, width: number, lines: number): string[] => {
 
 // A step to raise a halted task by: half its budget, at least five cents.
 export const raiseStep = (k: Task) => Math.max(0.05, Math.round(k.budgetUsd * 50) / 100)
-
-const isActionable = (trip: Trip | undefined): trip is Trip => trip !== undefined && trip.resolved === undefined
 
 // Folds or opens a section from how it is drawn now: a section the pane folded
 // to fit opens on the first press, and stays open.
@@ -472,10 +472,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
 
   // ---- the circuit callout -------------------------------------------------
 
-  const actionable = (t: Trip) => {
-    const task = b.tasks.find(k => k.id === t.taskId) ?? b.tasks.find(k => k.name === t.task)
-    return isActionable(t) && (now - t.at < 10 * 60_000 || task?.status === 'halted')
-  }
+  const actionable = (t: Trip) => isPending(b, t, now)
   const reasonLines = (t: Trip) => wrap(t.reason, C - 2, 2)
   const tripRowsOf = (t: Trip, withActions: boolean) =>
     1 + reasonLines(t).length + 1 + (t.resolved !== undefined ? 1 : withActions && actionable(t) ? 2 : 0)
@@ -637,13 +634,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
 
   const overview = () => {
     const alertRows = trip ? tripRowsOf(trip, true) : 1
-    // What needs the person: each halted task once, plus each recent loop or burn.
-    const fresh = new Set(
-      b.trips
-        .map((t, i) => ({ t, i }))
-        .filter(({ t }) => actionable(t))
-        .map(({ t, i }) => (t.kind === 'budget' || t.kind === 'halted' ? `task:${t.taskId ?? t.task}` : `alert:${i}`)),
-    ).size
+    const fresh = pendingCount(b, now)
     const limitRows = Math.max(1, windows.length)
     const tilesRows = 3 * tileRows.length + (tileRows.length - 1)
     const burnOpen = 1 + chartH + 1
@@ -926,4 +917,38 @@ export const migrateView = (saved: unknown): View => {
     task: v.task ?? v.khata ?? null,
     entry: v.entry ?? null,
   }
+}
+
+export type BarData = { book: Book; now: number; limits: Limits; width: number; isOpen: boolean }
+
+// The bar above the prompt: the name, the numbers that matter, a badge when
+// something needs the person, and the button that opens the dashboard.
+export function drawBar(kit: Kit, d: BarData, toggle: () => void) {
+  const { Box, Text, Button } = kit
+  const b = d.book
+  const spent = sessionUsd(b)
+  const rate = burnRate(b, d.now)
+  const limit = d.limits.burnLimitUsdPerMin
+  const stopped = b.entries.filter(en => en.outcome === 'blocked').length
+  const pending = pendingCount(b, d.now)
+  const roomy = d.width >= 70
+  return (
+    <Box key="bar" justifyContent="space-between" paddingX={1}>
+      <Box>
+        <Text bold>Token</Text>
+        <Text bold color={GOLD}>Munim</Text>
+        <Text color={FAINT}>{'   '}</Text>
+        <Text bold>{money(spent)}</Text>
+        <Text color={FAINT}>{' spent'}</Text>
+        {roomy ? <Text color={FAINT}>{' · '}</Text> : null}
+        {roomy ? <Text color={rate > limit ? RED : rate > limit * 0.75 ? AMBER : MUTED}>{`${money(rate)}/min`}</Text> : null}
+        {roomy ? <Text color={FAINT}>{` · ${stopped} stopped`}</Text> : null}
+        {pending > 0 ? <Text>{'  '}</Text> : null}
+        {pending > 0 ? <Text bold color={INK} backgroundColor={RED}>{` ● ${pending} new `}</Text> : null}
+      </Box>
+      <Box key="bar-toggle-box" backgroundColor={GOLD_DEEP}>
+        <Button key="bar-toggle" plain label={d.isOpen ? ' ▾ Close ' : ' ▴ Open '} hover={{ backgroundColor: GOLD, color: INK }} onPress={toggle} />
+      </Box>
+    </Box>
+  )
 }

@@ -112,8 +112,12 @@ export type SessionSummary = {
   tasks: { name: string; status: TaskStatus; usd: number; calls: number }[]
 }
 
+// The bar above the prompt: hidden until the person asks for it in a
+// session, with a button that opens and closes the dashboard.
+export type Bar = { shown: boolean; open: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
-    tokenmunim: { book: Book; view: View }
+    tokenmunim: { book: Book; view: View; bar: Bar }
   }
 }
