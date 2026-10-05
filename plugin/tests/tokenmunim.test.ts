@@ -605,22 +605,24 @@ test('the button stays hidden until /munim, then opens and closes the dashboard'
   await ui.unmount()
 })
 
-test('the dashboard has a close button of its own, and the button above the prompt reopens it', async ($, on) => {
+test('while the dashboard is open the button carries the cross, and drops it however the dashboard was closed', async ($, on) => {
   const open = panes(on)
   await crowdedSession($ as never, on)
-  await $.command.run({ command: 'munim', args: 'open' })
-  expect(open.has('tokenmunim')).toBe(true)
-  for (const width of [40, 66, 96]) {
-    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...(PANE.props as object), bodyColumns: width } as never })
-    expect(String((await ui.find({ key: 'pane-close' }))?.props.label).trim()).toBe('✕')
-    await ui.unmount()
-  }
-  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await pane.press({ key: 'pane-close' })
-  expect(open.has('tokenmunim')).toBe(false)
-  await pane.unmount()
+  await $.command.run({ command: 'munim', args: '' })
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  const label = async () => String((await band.find({ key: 'bar-toggle' }))?.props.label).trim()
+  expect(await label()).toBe('TokenMunim')
+  await band.press({ key: 'bar-toggle' })
+  expect(open.has('tokenmunim')).toBe(true)
+  expect(await label()).toBe('TokenMunim ✕')
+  // Closed another way: the button drops its cross all the same.
+  await $.command.run({ command: 'munim', args: 'close' })
+  expect(open.has('tokenmunim')).toBe(false)
+  expect(await label()).toBe('TokenMunim')
   await band.press({ key: 'bar-toggle' })
   expect(open.has('tokenmunim')).toBe(true)
   await band.unmount()
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await pane.find({ key: 'pane-close' })).toBeUndefined()
+  await pane.unmount()
 })

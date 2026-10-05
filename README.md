@@ -75,7 +75,7 @@ claude plugin install tokenmunim@tokenmunim
 
 The installer may say the settings aren't set yet. They all have defaults, so you can skip that.
 
-TokenMunim protects every session from the start, in the background, and shows nothing until you ask. Run `/munim` and a single **TokenMunim** button appears above the prompt, for that session only. Click it to open the dashboard. Click it again, or the ✕ in the dashboard's top corner, to close it.
+TokenMunim protects every session from the start, in the background, and shows nothing until you ask. Run `/munim` and a single **TokenMunim** button appears above the prompt, for that session only. Click it to open the dashboard. While the dashboard is open the button shows a ✕, and clicking it again closes it.
 
 ## Use it
 

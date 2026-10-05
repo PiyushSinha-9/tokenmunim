@@ -416,7 +416,6 @@ export const register: Register = (on, options) => {
         drill: task => void update($, view, cur => ({ ...migrateView(cur), task, tab: task === null ? cur.tab : 'activity', entry: null })),
         expand: entry => void update($, view, cur => ({ ...migrateView(cur), entry })),
         openLedger: () => void openLedger($),
-        close: () => void setPane($, false),
         raise: (taskId, by) => void decide($, 'raise', taskId, by),
         allow: () => void decide($, 'allow'),
         skip: taskId => void decide($, 'skip', taskId),

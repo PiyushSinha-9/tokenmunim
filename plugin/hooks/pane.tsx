@@ -39,7 +39,6 @@ export type PaneActions = {
   drill: (taskId: string | null) => void
   expand: (index: number | null) => void
   openLedger: () => void
-  close: () => void
   raise: (taskId: string, by: number) => void
   allow: () => void
   skip: (taskId: string) => void
@@ -214,14 +213,11 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   // ---- header and tabs -----------------------------------------------------
 
   // The header is one row, like an app's title bar: the wordmark in two
-  // tones, the tagline when there is room, status on the right, and a close
-  // button you can see at the very end. The status pill gives way first.
+  // tones, the tagline when there is room, status and the ledger on the right.
+  // Closing lives on the TokenMunim button above the prompt, not here.
   const elapsed = d.startedAt && d.startedAt > 0 ? `session ${span((now - d.startedAt) / 60_000)}` : ''
   const TAGLINE = '  cost control for AI agents'
-  const ledgerWidth = d.hasFile ? 1 + 8 : 0
-  const closeWidth = 1 + 3
-  const showStatus = 10 + 1 + 8 + ledgerWidth + closeWidth <= inner
-  const statusWidth = (showStatus ? 8 : 0) + ledgerWidth + closeWidth
+  const statusWidth = 8 + (d.hasFile ? 1 + 8 : 0)
   const showTagline = 10 + TAGLINE.length + 1 + statusWidth <= inner
   const header = (
     <Box key="header" justifyContent="space-between">
@@ -231,12 +227,9 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         {showTagline ? <Text color={FAINT}>{TAGLINE}</Text> : null}
       </Box>
       <Box>
-        {showStatus ? (isLive ? pill('● LIVE', GREEN, GREEN_BG) : pill('○ IDLE', FAINT)) : null}
+        {isLive ? pill('● LIVE', GREEN, GREEN_BG) : pill('○ IDLE', FAINT)}
         {d.hasFile ? <Text> </Text> : null}
         {d.hasFile ? link('open-ledger', 'ledger ↗', act.openLedger) : null}
-        <Box key="pane-close-box" backgroundColor={CHIP} marginLeft={1}>
-          <Button key="pane-close" plain role="dismiss" label=" ✕ " hover={{ backgroundColor: RED, color: INK }} onPress={act.close} />
-        </Box>
       </Box>
     </Box>
   )
@@ -927,14 +920,15 @@ export const migrateView = (saved: unknown): View => {
   }
 }
 
-// Above the prompt: one button, and nothing else. It opens the dashboard and
-// closes it again, lit in gold while the dashboard is open, like the active tab.
+// Above the prompt: one button, and nothing else. It opens the dashboard, and
+// while the dashboard is open it is lit gold, like the active tab, and carries
+// the cross that closes it.
 export function drawBar(kit: Kit, isOpen: boolean, toggle: () => void) {
   const { Box, Button } = kit
   return (
     <Box key="bar" justifyContent="flex-end" paddingX={1}>
       <Box key="bar-toggle-box" backgroundColor={isOpen ? GOLD_DEEP : CHIP}>
-        <Button key="bar-toggle" plain label=" TokenMunim " hover={{ backgroundColor: GOLD, color: INK }} onPress={toggle} />
+        <Button key="bar-toggle" plain label={isOpen ? ' TokenMunim ✕ ' : ' TokenMunim '} hover={{ backgroundColor: GOLD, color: INK }} onPress={toggle} />
       </Box>
     </Box>
   )
