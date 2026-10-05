@@ -423,8 +423,9 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         )
       }
     }
-    const title = t.resolved ? '⊘ CIRCUIT TRIP ' : isFresh ? '⊘ CIRCUIT TRIPPED ' : '⊘ LAST TRIP '
-    const when = `${!narrow && b.trips.length > 1 && key.startsWith('trip-latest') ? `${b.trips.length} trips · ` : ''}${clockTime(t.at, narrow)}`
+    const isLatest = key.startsWith('trip-latest')
+    const title = t.resolved || !isLatest ? '⊘ CIRCUIT TRIP ' : isFresh ? '⊘ CIRCUIT TRIPPED ' : '⊘ LAST TRIP '
+    const when = `${!narrow && b.trips.length > 1 && isLatest ? `${b.trips.length} trips · ` : ''}${clockTime(t.at, narrow)}`
     return card(
       key,
       [
@@ -487,8 +488,10 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
 
   // ---- tape rows -----------------------------------------------------------
 
+  // Narrow panes drop the duration so what a call was for keeps its room.
   const TIME = narrow ? 6 : 9
-  const S = Math.max(6, C - TIME - 2 - 7 - 7 - 2)
+  const DUR = narrow ? 0 : 7
+  const S = Math.max(6, C - TIME - 2 - 7 - DUR - 2)
   const agentName = (id: string | undefined) => b.agents.find(a => a.id === (id ?? MAIN))?.name ?? 'main'
   const entryDetails = (en: Entry) => {
     const khataName = b.khatas.find(k => k.id === en.khata)?.name ?? en.khata
@@ -526,7 +529,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
           <Text color={o.color}>{`${o.glyph} `}</Text>
           <Text bold color={isBlocked ? RED : undefined}>{pad(en.tool, 6)}</Text>
           <Text color={isBlocked ? RED : MUTED}>{` ${pad(isBlocked ? `circuit · ${en.note ?? ''} · ${en.summary}` : en.summary, S)}`}</Text>
-          <Text color={FAINT}>{lpad(isBlocked ? '' : duration(en.ms), 7)}</Text>
+          {DUR > 0 && <Text color={FAINT}>{lpad(isBlocked ? '' : duration(en.ms), DUR)}</Text>}
           <Text> </Text>
           {expandable ? link(`open-${index}`, isOpen ? '⌄' : '›', () => act.expand(isOpen ? null : index)) : <Text> </Text>}
         </Box>
@@ -691,7 +694,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
               'no-trips',
               [
                 <Text key="no-trips-title" bold color={GOLD}>NO CIRCUIT TRIPS</Text>,
-                <Text key="no-trips-text" color={FAINT}>{cut('Nothing has needed stopping this session.', C)}</Text>,
+                <Text key="no-trips-text" color={FAINT}>{cut('Nothing has needed stopping yet.', C)}</Text>,
               ],
               BORDER,
               1,
@@ -705,7 +708,8 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
 
   const agentsTab = () => {
     const list: AgentLedger[] = b.agents
-    const NAME = Math.max(6, C - 2 - (wide ? 35 : 22))
+    // dot 2, then steps and calls (6 each) on wide panes, then tokens 8, cost 8, cache 7.
+    const NAME = Math.max(6, C - (wide ? 37 : 25))
     return (
       <Box key="agents-tab" flexDirection="column">
         {card(

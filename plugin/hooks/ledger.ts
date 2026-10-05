@@ -158,10 +158,11 @@ export const openKhata = (book: Book, name: string, budgetUsd: number, now: numb
   return [{ ...closed, active: id, khatas: [...closed.khatas, made] }, made]
 }
 
+// Closes the open khata. Only one khata is ever open, so any other left open
+// (by a book from an older version) is closed with it.
 export const closeKhata = (book: Book): Book => {
-  if (book.active === null) return book
-  const shut = withKhata(book, book.active, k => (k.status === 'open' ? { ...k, status: 'closed' } : k))
-  return { ...shut, active: null }
+  if (book.active === null && !book.khatas.some(k => k.status === 'open')) return book
+  return { ...book, active: null, khatas: book.khatas.map(k => (k.status === 'open' ? { ...k, status: 'closed' } : k)) }
 }
 
 // ---- agents ----------------------------------------------------------------
