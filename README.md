@@ -5,7 +5,7 @@
 **A munim for your AI agent.** TokenMunim is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that keeps a ledger of everything an agent does, books what it spends to the task it spent it on, and trips a circuit breaker when the agent starts wasting money.
 
 <p align="center">
-  <img src="docs/screenshots/in-claude-code.png" alt="The TokenMunim pane docked beside a Claude Code session, transcript blurred">
+  <img src="docs/screenshots/claude-code-window.png" alt="The TokenMunim pane docked beside a Claude Code session, transcript blurred">
 </p>
 
 ## What "munim" means
