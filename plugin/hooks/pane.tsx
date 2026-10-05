@@ -212,17 +212,16 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
 
   // ---- header and tabs -----------------------------------------------------
 
-  // The header is one row, like an app's title bar: a gold logo tile, the
-  // wordmark in two tones, the tagline when there is room, status on the right.
+  // The header is one row, like an app's title bar: the wordmark in two
+  // tones, the tagline when there is room, status on the right.
   const elapsed = d.startedAt && d.startedAt > 0 ? `session ${span((now - d.startedAt) / 60_000)}` : ''
   const TAGLINE = '  cost control for AI agents'
   const statusWidth = 8 + (d.hasFile ? 1 + 8 : 0)
-  const showTagline = 3 + 11 + TAGLINE.length + 1 + statusWidth <= inner
+  const showTagline = 10 + TAGLINE.length + 1 + statusWidth <= inner
   const header = (
     <Box key="header" justifyContent="space-between">
       <Box>
-        <Text bold color={INK} backgroundColor={GOLD}>{' ◆ '}</Text>
-        <Text bold>{' Token'}</Text>
+        <Text bold>Token</Text>
         <Text bold color={GOLD}>Munim</Text>
         {showTagline ? <Text color={FAINT}>{TAGLINE}</Text> : null}
       </Box>

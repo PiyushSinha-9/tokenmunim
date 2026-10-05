@@ -1,6 +1,6 @@
 {
   "name": "tokenmunim",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Cost control for AI agents: a budget per task, a live ledger of every step, and a circuit breaker that stops loops, burn spikes and runaway spend.",
   "author": {
     "name": "Piyush Sinha",
