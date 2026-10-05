@@ -1,6 +1,6 @@
 {
   "name": "tokenmunim",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A munim for your AI agent: a khata per task, a live bahi of every step, and a circuit breaker for runaway spend.",
   "author": {
     "name": "Piyush Sinha",

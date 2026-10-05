@@ -37,7 +37,28 @@ The pane uses the munim's own words:
 
 A trip blocks one call and says why, so the agent can recover. It never ends the session, and it never blocks the tools an agent needs to get itself out of a halt.
 
-**The pane.** How much of your 5 hour and weekly limits is left, spend, cost and tokens per minute, a burn chart with the limit drawn in, the latest circuit trip, your khatas and the tape. Every section sits in a fixed frame, so a ten hour session looks as calm as a ten minute one.
+**Agents.** Every reply is booked to the loop that made it, the main agent or a subagent, with its own tokens, cost, steps and cache hit rate. When a run fans out, you can see which subagent did the spending.
+
+**Limits runway.** How much of your 5 hour and weekly limits is left, and whether the last twenty minutes' pace makes it to the reset: `✓ lasts`, or `⚠ out in 42m` while there is still time to slow down.
+
+**Token mix.** Where the tokens went: cache reads, fresh input, cache writes and output, with the cache hit rate that decides what a long session really costs.
+
+## The pane
+
+A dashboard that docks beside the transcript.
+
+| Tab | What it shows |
+|---|---|
+| **Overview** | Limits left with their runway, spend, cost and tokens per minute, the burn chart, the token mix, the latest circuit trip, khatas and the tape |
+| **Khatas** | Every khata with its spend, tokens, budget bar and calls. `›` opens its own tape |
+| **Tape** | Every call, newest first, filtered to one khata when you drill in. `›` opens a call's details |
+| **Trips** | Every circuit trip, and what was done about it |
+| **Agents** | The main agent and each subagent, with their model, steps, tokens, cost and cache hit rate |
+
+* **Act on a trip from the pane.** The circuit card has buttons: `+$0.50 budget` gives a halted khata more room, `Allow once` lets the next call through, `Skip task` moves the agent on. Each one is recorded on the trip.
+* **Fold any section** with its `▾` to a single summary line, and unfold it again.
+* **Fits any width.** Columns drop out in a fixed order as the pane narrows, tabs shorten, and bars stretch or shrink, so nothing wraps or spills.
+* **Never floods.** Every list sits in a fixed frame: the overview folds and trims itself to the pane's height, and older rows live in `bahi.md`.
 
 <p align="center">
   <img src="docs/screenshots/limits-and-burn.png" width="420" alt="Limits left, the KPI cards and the burn chart">
@@ -66,6 +87,7 @@ Ask for khatas in your prompt:
 | `/munim` | Opens the pane |
 | `/munim statement` | Prints the session's statement |
 | `/munim bahi` | Writes the ledger file and opens it |
+| `/munim tab <name>` | Switches the pane to `overview`, `khatas`, `tape`, `trips` or `agents` |
 | `/munim khata <name>` | Opens a khata by hand |
 | `/munim close` | Closes the open khata |
 | `/munim reset` | Clears this session's book |
@@ -89,7 +111,12 @@ Change them in `/plugin`, under TokenMunim's configuration.
 
 ## How it works
 
-TokenMunim hooks five events: every tool call (check, run, record), every model reply (book its tokens and cost), the end of each turn (save the ledger), its slash command, and the pane's draw. The rules are pure functions over one immutable book, so every one is tested without a live session. [docs/DESIGN.md](docs/DESIGN.md) covers the design, the trade-offs, and the bugs TokenMunim found in itself.
+TokenMunim hooks five events: every tool call (check, run, record), every model reply (book its tokens and cost to the khata and the agent), the end of each turn (save the ledger), its slash command, and the pane's draw. The rules are pure functions over one immutable book, the pane is pure drawing over that book and its own view state, and both are tested without a live session, buttons and all. [docs/DESIGN.md](docs/DESIGN.md) covers the design, the trade-offs, and the bugs TokenMunim found in itself.
+
+## Future plans
+
+* **Smarter loop detection.** Catch thrashing (many different edits while the same test keeps failing) and no progress (many calls with no file or test changing), not only exact repeats.
+* **Alerts for overnight runs.** A desktop notification or a Slack message when a circuit trips, so an unattended run can wake you.
 
 ## Develop
 
