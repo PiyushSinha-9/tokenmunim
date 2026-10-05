@@ -198,7 +198,7 @@ export const register: Register = (on, options) => {
     })
     await $.command.register({
       name: 'munim',
-      description: 'TokenMunim: show its bar for this session, or open, close, off, statement, ledger, tab, fold, unfold, task, end, reset',
+      description: 'TokenMunim: show its button for this session, or open, close, off, statement, ledger, tab, fold, unfold, task, end, reset',
       argumentHint: 'open | close | off | statement | ledger | tab <name> | fold <section> | unfold <section> | task <name> | end | reset',
     })
     await locate($)
@@ -324,7 +324,7 @@ export const register: Register = (on, options) => {
 
     if (verb === '' || verb === 'bar') {
       await update($, bar, cur => ({ ...cur, shown: true }))
-      return { text: 'TokenMunim is on for this session. Click Open in the bar above the prompt to see the dashboard, or run /munim open.' }
+      return { text: 'TokenMunim is on for this session. Click the TokenMunim button above the prompt to open the dashboard, and click it again to close it.' }
     }
     if (verb === 'open' || verb === 'pane') {
       await setPane($, true)
@@ -332,12 +332,12 @@ export const register: Register = (on, options) => {
     }
     if (verb === 'close') {
       await setPane($, false)
-      return { text: 'TokenMunim dashboard is closed. The bar stays; click Open to bring it back.' }
+      return { text: 'TokenMunim dashboard is closed. Click the TokenMunim button above the prompt to bring it back.' }
     }
     if (verb === 'off') {
       await setPane($, false)
       await update($, bar, () => ({ shown: false, open: false }))
-      return { text: 'TokenMunim is out of sight for this session, and still protecting it. Run /munim to bring the bar back.' }
+      return { text: 'TokenMunim is out of sight for this session, and still protecting it. Run /munim to bring the button back.' }
     }
     if (verb === 'tab') {
       const tab = TABS.find(t => t === (rest[0] ?? '').toLowerCase())
@@ -396,9 +396,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const shown = await read($, bar)
     if (!shown.shown || e.props.hasSurvey) return next(e)
-    const b = normalize(await read($, book))
-    const now = await $.clock.now()
-    return drawBar($.ui.resolve(e), { book: b, now, limits, width: e.props.bodyColumns, isOpen: shown.open }, () => void togglePane($))
+    return drawBar($.ui.resolve(e), shown.open, () => void togglePane($))
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -418,6 +416,7 @@ export const register: Register = (on, options) => {
         drill: task => void update($, view, cur => ({ ...migrateView(cur), task, tab: task === null ? cur.tab : 'activity', entry: null })),
         expand: entry => void update($, view, cur => ({ ...migrateView(cur), entry })),
         openLedger: () => void openLedger($),
+        close: () => void setPane($, false),
         raise: (taskId, by) => void decide($, 'raise', taskId, by),
         allow: () => void decide($, 'allow'),
         skip: taskId => void decide($, 'skip', taskId),

@@ -39,6 +39,7 @@ export type PaneActions = {
   drill: (taskId: string | null) => void
   expand: (index: number | null) => void
   openLedger: () => void
+  close: () => void
   raise: (taskId: string, by: number) => void
   allow: () => void
   skip: (taskId: string) => void
@@ -213,10 +214,14 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   // ---- header and tabs -----------------------------------------------------
 
   // The header is one row, like an app's title bar: the wordmark in two
-  // tones, the tagline when there is room, status on the right.
+  // tones, the tagline when there is room, status on the right, and a close
+  // button you can see at the very end. The status pill gives way first.
   const elapsed = d.startedAt && d.startedAt > 0 ? `session ${span((now - d.startedAt) / 60_000)}` : ''
   const TAGLINE = '  cost control for AI agents'
-  const statusWidth = 8 + (d.hasFile ? 1 + 8 : 0)
+  const ledgerWidth = d.hasFile ? 1 + 8 : 0
+  const closeWidth = 1 + 3
+  const showStatus = 10 + 1 + 8 + ledgerWidth + closeWidth <= inner
+  const statusWidth = (showStatus ? 8 : 0) + ledgerWidth + closeWidth
   const showTagline = 10 + TAGLINE.length + 1 + statusWidth <= inner
   const header = (
     <Box key="header" justifyContent="space-between">
@@ -226,9 +231,12 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         {showTagline ? <Text color={FAINT}>{TAGLINE}</Text> : null}
       </Box>
       <Box>
-        {isLive ? pill('● LIVE', GREEN, GREEN_BG) : pill('○ IDLE', FAINT)}
+        {showStatus ? (isLive ? pill('● LIVE', GREEN, GREEN_BG) : pill('○ IDLE', FAINT)) : null}
         {d.hasFile ? <Text> </Text> : null}
         {d.hasFile ? link('open-ledger', 'ledger ↗', act.openLedger) : null}
+        <Box key="pane-close-box" backgroundColor={CHIP} marginLeft={1}>
+          <Button key="pane-close" plain role="dismiss" label=" ✕ " hover={{ backgroundColor: RED, color: INK }} onPress={act.close} />
+        </Box>
       </Box>
     </Box>
   )
@@ -919,35 +927,14 @@ export const migrateView = (saved: unknown): View => {
   }
 }
 
-export type BarData = { book: Book; now: number; limits: Limits; width: number; isOpen: boolean }
-
-// The bar above the prompt: the name, the numbers that matter, a badge when
-// something needs the person, and the button that opens the dashboard.
-export function drawBar(kit: Kit, d: BarData, toggle: () => void) {
-  const { Box, Text, Button } = kit
-  const b = d.book
-  const spent = sessionUsd(b)
-  const rate = burnRate(b, d.now)
-  const limit = d.limits.burnLimitUsdPerMin
-  const stopped = b.entries.filter(en => en.outcome === 'blocked').length
-  const pending = pendingCount(b, d.now)
-  const roomy = d.width >= 70
+// Above the prompt: one button, and nothing else. It opens the dashboard and
+// closes it again, lit in gold while the dashboard is open, like the active tab.
+export function drawBar(kit: Kit, isOpen: boolean, toggle: () => void) {
+  const { Box, Button } = kit
   return (
-    <Box key="bar" justifyContent="space-between" paddingX={1}>
-      <Box>
-        <Text bold>Token</Text>
-        <Text bold color={GOLD}>Munim</Text>
-        <Text color={FAINT}>{'   '}</Text>
-        <Text bold>{money(spent)}</Text>
-        <Text color={FAINT}>{' spent'}</Text>
-        {roomy ? <Text color={FAINT}>{' · '}</Text> : null}
-        {roomy ? <Text color={rate > limit ? RED : rate > limit * 0.75 ? AMBER : MUTED}>{`${money(rate)}/min`}</Text> : null}
-        {roomy ? <Text color={FAINT}>{` · ${stopped} stopped`}</Text> : null}
-        {pending > 0 ? <Text>{'  '}</Text> : null}
-        {pending > 0 ? <Text bold color={INK} backgroundColor={RED}>{` ● ${pending} new `}</Text> : null}
-      </Box>
-      <Box key="bar-toggle-box" backgroundColor={GOLD_DEEP}>
-        <Button key="bar-toggle" plain label={d.isOpen ? ' ▾ Close ' : ' ▴ Open '} hover={{ backgroundColor: GOLD, color: INK }} onPress={toggle} />
+    <Box key="bar" justifyContent="flex-end" paddingX={1}>
+      <Box key="bar-toggle-box" backgroundColor={isOpen ? GOLD_DEEP : CHIP}>
+        <Button key="bar-toggle" plain label=" TokenMunim " hover={{ backgroundColor: GOLD, color: INK }} onPress={toggle} />
       </Box>
     </Box>
   )

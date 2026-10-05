@@ -75,7 +75,7 @@ claude plugin install tokenmunim@tokenmunim
 
 The installer may say the settings aren't set yet. They all have defaults, so you can skip that.
 
-TokenMunim protects every session from the start, in the background, and shows nothing until you ask. Run `/munim` and a slim bar appears above the prompt, for that session only: your spend, cost per minute, calls stopped, a red badge when something needs you, and a button that opens the dashboard and closes it again.
+TokenMunim protects every session from the start, in the background, and shows nothing until you ask. Run `/munim` and a single **TokenMunim** button appears above the prompt, for that session only. Click it to open the dashboard. Click it again, or the ✕ in the dashboard's top corner, to close it.
 
 ## Use it
 
@@ -85,9 +85,9 @@ Ask for tasks in your prompt:
 
 | Command | What it does |
 |---|---|
-| `/munim` | Shows TokenMunim's bar above the prompt, for this session |
-| `/munim open` / `/munim close` | Opens or closes the dashboard, like the bar's button |
-| `/munim off` | Hides the bar and the dashboard; protection carries on |
+| `/munim` | Shows the TokenMunim button above the prompt, for this session |
+| `/munim open` / `/munim close` | Opens or closes the dashboard, like the button |
+| `/munim off` | Hides the button and the dashboard; protection carries on |
 | `/munim statement` | Prints the session's statement |
 | `/munim ledger` | Writes the ledger file and opens it |
 | `/munim tab <name>` | Switches to `overview`, `tasks`, `activity`, `alerts` or `agents` |

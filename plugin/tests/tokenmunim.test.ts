@@ -583,35 +583,44 @@ function panes(on: On) {
   return open
 }
 
-test('the bar stays hidden until /munim, and its button opens and closes the dashboard', async ($, on) => {
+test('the button stays hidden until /munim, then opens and closes the dashboard', async ($, on) => {
   world(on)
   const open = panes(on)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })
-    expect(await ui.find({ type: 'Text', text: /^Munim$/ })).toBeUndefined()
+    expect(await ui.find({ key: 'bar-toggle' })).toBeUndefined()
     await ui.unmount()
   }
   await $.command.run({ command: 'munim', args: '' })
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^Munim$/ })).toBeDefined()
-  expect(String((await ui.find({ key: 'bar-toggle' }))?.props.label)).toContain('Open')
+  // One button named TokenMunim, and nothing else in the band.
+  expect(String((await ui.find({ key: 'bar-toggle' }))?.props.label).trim()).toBe('TokenMunim')
+  expect(await ui.find({ type: 'Text', text: /spent|stopped|new/ })).toBeUndefined()
   await ui.press({ key: 'bar-toggle' })
   expect(open.has('tokenmunim')).toBe(true)
-  expect(String((await ui.find({ key: 'bar-toggle' }))?.props.label)).toContain('Close')
   await ui.press({ key: 'bar-toggle' })
   expect(open.has('tokenmunim')).toBe(false)
-  expect(String((await ui.find({ key: 'bar-toggle' }))?.props.label)).toContain('Open')
   await $.command.run({ command: 'munim', args: 'off' })
-  expect(await ui.find({ type: 'Text', text: /^Munim$/ })).toBeUndefined()
+  expect(await ui.find({ key: 'bar-toggle' })).toBeUndefined()
   await ui.unmount()
 })
 
-test('the bar shows what needs attention as a badge', async ($, on) => {
-  panes(on)
+test('the dashboard has a close button of its own, and the button above the prompt reopens it', async ($, on) => {
+  const open = panes(on)
   await crowdedSession($ as never, on)
-  await $.command.run({ command: 'munim', args: '' })
-  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /1 new/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /stopped/ })).toBeDefined()
-  await ui.unmount()
+  await $.command.run({ command: 'munim', args: 'open' })
+  expect(open.has('tokenmunim')).toBe(true)
+  for (const width of [40, 66, 96]) {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...(PANE.props as object), bodyColumns: width } as never })
+    expect(String((await ui.find({ key: 'pane-close' }))?.props.label).trim()).toBe('✕')
+    await ui.unmount()
+  }
+  const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await pane.press({ key: 'pane-close' })
+  expect(open.has('tokenmunim')).toBe(false)
+  await pane.unmount()
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await band.press({ key: 'bar-toggle' })
+  expect(open.has('tokenmunim')).toBe(true)
+  await band.unmount()
 })
