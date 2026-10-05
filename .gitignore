@@ -1,0 +1,5 @@
+.DS_Store
+.tokenmunim/
+plugin/.claude-plugin/types/
+plugin/tsconfig.json
+__pycache__/

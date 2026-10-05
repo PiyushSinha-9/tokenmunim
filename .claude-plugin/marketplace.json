@@ -1,0 +1,15 @@
+{
+  "name": "tokenmunim",
+  "description": "TokenMunim: a munim for your AI agent, as a Claude Code mod.",
+  "owner": {
+    "name": "Piyush Sinha",
+    "url": "https://github.com/PiyushSinha-9"
+  },
+  "plugins": [
+    {
+      "name": "tokenmunim",
+      "source": "./plugin",
+      "description": "A munim for your AI agent: a khata per task, a live bahi of every step, and a circuit breaker for runaway spend."
+    }
+  ]
+}

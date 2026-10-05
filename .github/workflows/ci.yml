@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Claude Code
+        run: curl -fsSL https://claude.ai/install.sh | bash
+
+      - name: Validate the plugin and the marketplace
+        run: |
+          ~/.local/bin/claude plugin validate ./plugin
+          ~/.local/bin/claude plugin validate .
+
+      - name: Run the tests
+        run: ~/.local/bin/claude plugin test ./plugin
