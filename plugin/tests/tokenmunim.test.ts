@@ -259,7 +259,7 @@ test('books cost to the open task and writes a statement', () => {
 test('an older book is brought up to date and its general task un-halted', () => {
   const v1 = { khatas: [{ id: 'general', name: 'general', status: 'halted', usd: 1.2, budgetUsd: 1, calls: 4, fails: 0, blocked: 1, openedAt: 0 }], entries: [], active: 'general', lastUsd: 1.2, samples: [], streaks: {}, burnPausedUntil: 0, saved: 0 }
   const b = normalize(v1 as never)
-  expect(b.v).toBe(5)
+  expect(b.v).toBe(6)
   expect(b.trips).toEqual([])
   expect(b.agents).toEqual([])
   expect(b.mix.cacheRead).toBe(0)
@@ -276,7 +276,7 @@ test('a book from before plain words keeps its tasks, activity and trips', () =>
     active: 'strategy-6-1', lastUsd: 0.14, samples: [], tokens: 163_000, tokenSamples: [], rateLimits: [], streaks: {}, burnPausedUntil: 0, saved: 0,
   }
   const b = normalize(v4 as never)
-  expect(b.v).toBe(5)
+  expect(b.v).toBe(6)
   expect(b.tasks[0]?.name).toBe('strategy 6')
   expect(b.entries[0]?.task).toBe('strategy-6-1')
   expect(b.trips[0]?.task).toBe('strategy 6')
@@ -335,8 +335,13 @@ test('the overview draws the tasks, a halted task and the circuit card on every 
     expect(await ui.find({ type: 'Text', text: /T O K E N M U N I M/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /iron condor/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /halted/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /CIRCUIT TRIPPED/ })).toBeDefined()
     expect(await ui.find({ key: 'fold-mix' })).toBeDefined()
+    // The alert waits, folded, behind its notification pill.
+    expect(await ui.find({ type: 'Text', text: /1 new/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /CIRCUIT TRIPPED/ })).toBeUndefined()
+    await ui.press({ key: 'fold-alerts' })
+    expect(await ui.find({ type: 'Text', text: /CIRCUIT TRIPPED/ })).toBeDefined()
+    await ui.press({ key: 'fold-alerts' })
     await ui.unmount()
   }
 })
@@ -361,6 +366,7 @@ test('tabs switch the view, and a task opens its own activity', async ($, on) =>
 test('the circuit card raises a budget, and the halted task carries on', async ($, on) => {
   await busySession($ as never, on)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'fold-alerts' })
   await ui.press({ key: 'trip-latest-raise-btn' })
   expect(await ui.find({ type: 'Text', text: /budget raised to/ })).toBeDefined()
   expect(denied(await $.tool.call({ tool: 'Bash', command: 'python backtest.py --again' }))).toBe(false)
@@ -376,6 +382,7 @@ test('the circuit card lets one call through a loop', async ($, on) => {
   }
   expect(denied(await $.tool.call({ tool: 'Bash', command: 'python fetch.py' }))).toBe(true)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'fold-alerts' })
   await ui.press({ key: 'trip-latest-allow-btn' })
   expect(await ui.find({ type: 'Text', text: /one call allowed/ })).toBeDefined()
   expect(denied(await $.tool.call({ tool: 'Bash', command: 'python fetch.py' }))).toBe(false)
@@ -423,14 +430,14 @@ const at = (surface: 'terminal' | 'desktop', columns: number, rows: number) => (
 })
 
 // What each section shows only while it is open.
-const BODY: Record<string, RegExp> = { burn: /m ago$/, mix: /No replies booked yet|cache read/, tasks: /USED/, activity: /Backtest strategy 8/ }
+const BODY: Record<string, RegExp> = { burn: /m ago$/, mix: /No replies booked yet|cache read/, tasks: /USED/, activity: /Backtest strategy 8/, alerts: /CIRCUIT TRIP/ }
 
 test('every section opens and folds on the first press, even one the pane folded to fit', async ($, on) => {
   await crowdedSession($ as never, on)
   for (const surface of ['terminal', 'desktop'] as const) {
     for (const [columns, rows] of [[66, 30], [66, 38], [66, 60], [46, 34]] as const) {
       const ui = await $.ui.mount(at(surface, columns, rows))
-      for (const id of ['burn', 'mix', 'tasks', 'activity']) {
+      for (const id of ['burn', 'mix', 'tasks', 'activity', 'alerts']) {
         for (let press = 0; press < 2; press++) {
           const label = String((await ui.find({ key: `fold-${id}` }))?.props.label ?? '')
           const wasFolded = label.startsWith('▸')
@@ -513,10 +520,30 @@ test('skip task on a loop halts the task and the agent is told to move on', asyn
   }
   expect(denied(await $.tool.call({ tool: 'Bash', command: 'python fetch.py' }))).toBe(true)
   const ui = await $.ui.mount(at('terminal', 66, 44))
+  await ui.press({ key: 'fold-alerts' })
   await ui.press({ key: 'trip-latest-skip-btn' })
   expect(await ui.find({ type: 'Text', text: /task skipped by you/ })).toBeDefined()
   state.failing = false
   const next = await $.tool.call({ tool: 'Bash', command: 'python other.py' })
   expect(JSON.stringify(next)).toContain('skipped by you')
+  await ui.unmount()
+})
+
+test('an old alert is reworded in plain words when its ledger loads', () => {
+  const v5 = { v: 5, tasks: [], entries: [], trips: [{ at: 1, kind: 'halted', task: 'x', taskId: 'x-1', tool: 'Bash', summary: 's', reason: 'Khata "x" is halted. Waiting for the next khata.' }], agents: [], active: null, lastUsd: null, samples: [], tokens: 0, tokenSamples: [], mix: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, rateLimits: [], limitSamples: {}, streaks: {}, burnPausedUntil: 0, passes: 0, saved: 0 }
+  expect(normalize(v5 as never).trips[0]?.reason).toBe('Task "x" is halted. Waiting for the next task.')
+})
+
+test('a halted task counts once in the alerts badge, however many alerts it raised', async ($, on) => {
+  const { clock, state } = world(on)
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'tiny', budget_usd: 0.05 })
+  await $.tool.call({ tool: 'Read', file_path: 'a.csv' })
+  state.usd = 0.2
+  await clock.advance(5_000)
+  expect(denied(await $.tool.call({ tool: 'Read', file_path: 'b.csv' }))).toBe(true)
+  await clock.advance(5_000)
+  expect(denied(await $.tool.call({ tool: 'Read', file_path: 'c.csv' }))).toBe(true)
+  const ui = await $.ui.mount(at('terminal', 66, 44))
+  expect(await ui.find({ type: 'Text', text: /1 new/ })).toBeDefined()
   await ui.unmount()
 })

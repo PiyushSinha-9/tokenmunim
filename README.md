@@ -53,6 +53,7 @@ A dashboard that docks beside the transcript.
 | **Alerts** | Everything the circuit breaker stopped, and what was done about it |
 | **Agents** | The main agent and each subagent, with their model, steps, tokens, cost and cache hit rate |
 
+* **Alerts wait at the end.** The Alerts section stays folded behind a red `● 1 new` badge until you open it, counting each halted task once.
 * **Act on an alert from the pane.** The alert has buttons: `+$0.50 budget` gives a halted task more room, `Allow once` lets the next call through, `Skip task` moves the agent on. Each choice is recorded on the alert.
 * **Fold any section** by clicking its title, and click again to open it. A section you open stays open: when room runs short the pane folds the others, never yours. From the keyboard: `/munim fold activity`, `/munim unfold burn`.
 * **Fits any width.** Columns drop out in a fixed order as the pane narrows, tabs shorten, and charts stretch or shrink, so nothing wraps or spills.

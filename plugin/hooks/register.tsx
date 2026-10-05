@@ -40,7 +40,7 @@ const OWN = 'mcp__tokenmunim__'
 const EXEMPT = new Set(['ToolSearch'])
 const HISTORY_KEY = 'history'
 const TABS: readonly Tab[] = ['overview', 'tasks', 'activity', 'alerts', 'agents']
-const SECTIONS: readonly string[] = ['burn', 'mix', 'tasks', 'activity']
+const SECTIONS: readonly string[] = ['burn', 'mix', 'tasks', 'activity', 'alerts']
 const book = atom({ plugin: 'tokenmunim', key: 'book' } as const, emptyBook())
 const view = atom({ plugin: 'tokenmunim', key: 'view' } as const, DEFAULT_VIEW)
 

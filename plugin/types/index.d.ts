@@ -73,7 +73,7 @@ export type AgentLedger = {
 }
 
 export type Book = {
-  v: 5
+  v: 6
   tasks: Task[]
   entries: Entry[]
   trips: Trip[]

@@ -53,7 +53,7 @@ export type PaneData = {
   startedAt?: number
 }
 
-export const DEFAULT_VIEW: View = { tab: 'overview', folded: ['activity'], opened: [], task: null, entry: null }
+export const DEFAULT_VIEW: View = { tab: 'overview', folded: ['activity', 'alerts'], opened: [], task: null, entry: null }
 
 // ---- the palette -------------------------------------------------------------
 
@@ -476,7 +476,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   const reasonLines = (t: Trip) => wrap(t.reason, C - 2, 2)
   const tripRowsOf = (t: Trip, withActions: boolean) =>
     1 + reasonLines(t).length + 1 + (t.resolved !== undefined ? 1 : withActions && actionable(t) ? 2 : 0)
-  const tripCard = (t: Trip, key: string, withActions: boolean, marginTop: number) => {
+  const tripCard = (t: Trip, key: string, withActions: boolean, marginTop: number, inline = false) => {
     const isFresh = now - t.at < 10 * 60_000
     const isLatest = key.startsWith('trip-latest')
     const task = b.tasks.find(k => k.id === t.taskId) ?? b.tasks.find(k => k.name === t.task)
@@ -494,10 +494,8 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
       }
     }
     const title = t.resolved || !isLatest ? 'CIRCUIT TRIP' : isFresh ? 'CIRCUIT TRIPPED' : 'LAST CIRCUIT TRIP'
-    const when = `${!narrow && b.trips.length > 1 && isLatest ? `${b.trips.length} alerts · ` : ''}${clockTime(t.at, narrow)}`
-    return panel(
-      key,
-      [
+    const when = `${!narrow && !inline && b.trips.length > 1 && isLatest ? `${b.trips.length} alerts · ` : ''}${clockTime(t.at, narrow)}`
+    const lines = [
         <Box key={`${key}-head`} justifyContent="space-between">
           <Box>
             {bar}
@@ -528,10 +526,15 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
             {buttons}
           </Box>
         ) : null,
-      ],
-      marginTop,
-      t.resolved ? PANEL : RED_PANEL,
-    )
+      ]
+    if (inline) {
+      return (
+        <Box key={key} flexDirection="column" backgroundColor={t.resolved ? undefined : RED_PANEL}>
+          {lines}
+        </Box>
+      )
+    }
+    return panel(key, lines, marginTop, t.resolved ? PANEL : RED_PANEL)
   }
 
   // ---- task rows ----------------------------------------------------------
@@ -630,7 +633,14 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   // ---- the tabs ------------------------------------------------------------
 
   const overview = () => {
-    const tripRows = trip ? tripRowsOf(trip, true) : 0
+    const alertRows = trip ? tripRowsOf(trip, true) : 1
+    // What needs the person: each halted task once, plus each recent loop or burn.
+    const fresh = new Set(
+      b.trips
+        .map((t, i) => ({ t, i }))
+        .filter(({ t }) => actionable(t))
+        .map(({ t, i }) => (t.kind === 'budget' || t.kind === 'halted' ? `task:${t.taskId ?? t.task}` : `alert:${i}`)),
+    ).size
     const limitRows = Math.max(1, windows.length)
     const tilesRows = 3 * tileRows.length + (tileRows.length - 1)
     const burnOpen = 1 + chartH + 1
@@ -644,16 +654,18 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     // scrolls if they open more than fits.
     const opened = new Set(view.opened ?? [])
     const shut = new Set(view.folded.filter(id => !opened.has(id)))
+    // Alerts stay folded behind their notification pill until opened.
+    if (!opened.has('alerts')) shut.add('alerts')
     const autoFold = (id: string) => {
       if (!opened.has(id)) shut.add(id)
     }
     let taskCount = Math.min(b.tasks.length, 8)
     let activityCount = 5
     const panels = () =>
-      limitRows + tilesRows + (shut.has('burn') ? 1 : burnOpen) + (shut.has('mix') ? 1 : mixOpen) + tripRows +
+      limitRows + tilesRows + (shut.has('burn') ? 1 : burnOpen) + (shut.has('mix') ? 1 : mixOpen) + (shut.has('alerts') ? 1 : 1 + alertRows) +
       (shut.has('tasks') ? 1 : tasksOpen(taskCount)) + (shut.has('activity') ? 1 : activityOpen(activityCount))
     const chrome = 2 + 3 + 1 // header, tabs, footer
-    const gaps = 6 + (trip ? 1 : 0) + 1
+    const gaps = 8
     const fits = () => chrome + panels() + gaps <= R
     while (!fits() && taskCount > 5) taskCount -= 1
     while (!fits() && activityCount > 2 && !shut.has('activity')) activityCount -= 1
@@ -688,7 +700,6 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         {tilesBlock(1)}
         {section('burn', 'BURN RATE', burnRight, shut.has('burn'), burnBody, 1)}
         {section('mix', 'TOKEN MIX', mixRight, shut.has('mix'), mixBody, 1)}
-        {trip !== undefined ? tripCard(trip, 'trip-latest', true, 1) : null}
         {section(
           'tasks',
           'TASKS',
@@ -710,6 +721,23 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
             {activity.length === 0 ? <Text color={FAINT}>Waiting for the first step…</Text> : null}
             {activity.map((en, i) => activityRow(en, newest - i, false))}
           </Box>,
+          1,
+        )}
+        {section(
+          'alerts',
+          'ALERTS',
+          <Box key="alerts-right">
+            {fresh > 0 ? pill(`● ${fresh} new`, INK, RED) : null}
+            <Text color={fresh > 0 ? FAINT : MUTED}>
+              {b.trips.length === 0 ? 'none' : `${fresh > 0 ? ' ' : ''}${b.trips.length} total${trip && fresh === 0 ? ` · last ${clockTime(trip.at, true)}` : ''}`}
+            </Text>
+          </Box>,
+          shut.has('alerts'),
+          trip !== undefined ? (
+            tripCard(trip, 'trip-latest', true, 0, true)
+          ) : (
+            <Text key="no-alerts" color={FAINT}>{cut('The circuit breaker has not stopped anything yet.', C)}</Text>
+          ),
           1,
         )}
         {footer(1)}

@@ -48,7 +48,7 @@ export const RUNWAY_WINDOW_MS = 20 * 60_000
 const emptyMix = (): TokenMix => ({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0 })
 
 export const emptyBook = (): Book => ({
-  v: 5,
+  v: 6,
   tasks: [],
   entries: [],
   trips: [],
@@ -81,12 +81,13 @@ type OlderBook = Partial<Omit<Book, 'v' | 'tasks' | 'entries' | 'trips'>> & {
 // Brings a book written by an older version up to this one. Version 2 took the
 // budget off the general task (lifting a budget halt on it), version 3 counts
 // tokens, version 4 adds agents, the token mix and the limit history, and
-// version 5 names things in plain words: tasks, activity, the ledger.
+// version 5 names things in plain words: tasks, activity, the ledger, and
+// version 6 carries those words into alert text saved before them.
 export const normalize = (book: OlderBook | Book | undefined | null): Book => {
-  if (book && book.v === 5) return book as Book
+  if (book && book.v === 6) return book as Book
   const src = (book ?? {}) as OlderBook
   const { khatas: _oldTasks, ...current } = src
-  const base = { ...emptyBook(), ...current, v: 5 as const }
+  const base = { ...emptyBook(), ...current, v: 6 as const }
   const tasks = (src.tasks ?? src.khatas ?? []).map(t => {
     const counted: Task = { ...t, tokens: t.tokens ?? 0 }
     return t.id === GENERAL && (src.v ?? 1) < 2
@@ -94,7 +95,14 @@ export const normalize = (book: OlderBook | Book | undefined | null): Book => {
       : counted
   })
   const entries: Entry[] = (src.entries ?? []).map(({ khata, ...e }) => ({ ...e, task: e.task ?? khata ?? GENERAL }))
-  const trips: Trip[] = (src.trips ?? []).map(({ khata, khataId, ...t }) => ({ ...t, task: t.task ?? khata ?? 'general', taskId: t.taskId ?? khataId }))
+  // Alert text saved before version 5 spoke of khatas too.
+  const plain = (text: string) => text.replace(/\bKhata\b/g, 'Task').replace(/\bkhatas\b/g, 'tasks').replace(/\bkhata\b/g, 'task')
+  const trips: Trip[] = (src.trips ?? []).map(({ khata, khataId, ...t }) => ({
+    ...t,
+    task: t.task ?? khata ?? 'general',
+    taskId: t.taskId ?? khataId,
+    reason: plain(t.reason),
+  }))
   return {
     ...base,
     tasks,
