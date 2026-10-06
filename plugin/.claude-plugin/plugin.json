@@ -1,7 +1,7 @@
 {
   "name": "tokenmunim",
-  "version": "0.7.2",
-  "description": "Cost control for AI agents: a budget per task, a live ledger of every step, and a circuit breaker that stops loops, burn spikes and runaway spend.",
+  "version": "0.8.0",
+  "description": "Cost control for AI agents: budgets as a share of your plan, a live ledger of every step, and a circuit breaker that stops loops, burn spikes and runaway usage.",
   "author": {
     "name": "Piyush Sinha",
     "url": "https://github.com/PiyushSinha-9"
@@ -21,17 +21,17 @@
   ],
   "types": "./types/index.d.ts",
   "userConfig": {
-    "taskBudgetUsd": {
-      "type": "number",
-      "title": "Budget per task (USD)",
-      "description": "A task that spends this much is halted. The general task, which catches work outside any task, has no budget of its own.",
-      "default": 1
+    "taskBudget": {
+      "type": "string",
+      "title": "Budget per task",
+      "description": "A share of your plan, like \"1% week\" or \"10% 5h\", or dollars, like \"$1\". A task that uses its budget is halted. On an account without plan limits a share counts as $1.",
+      "default": "1% week"
     },
-    "sessionBudgetUsd": {
-      "type": "number",
-      "title": "Session budget (USD)",
-      "description": "Every tool call is blocked once the session has spent this much since TokenMunim started.",
-      "default": 20
+    "sessionBudget": {
+      "type": "string",
+      "title": "Session budget",
+      "description": "A share of your plan, like \"20% week\" or \"50% 5h\", or dollars, like \"$20\". Every tool call is blocked once the session has used it. Only this session's own usage counts. On an account without plan limits a share counts as $20.",
+      "default": "20% week"
     },
     "loopLimit": {
       "type": "number",

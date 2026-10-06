@@ -63,11 +63,25 @@ TokenMunim watched its own development session, and that session broke it four t
 
 The API reports how much of each plan window (5 hour, weekly) is used. TokenMunim keeps twenty minutes of those readings per window and works out the pace in points per minute. Dividing what is left by that pace gives the minutes until the window runs out, and comparing that with the window's reset time gives the answer that matters: this pace makes it to the reset, or it runs out in 42 minutes. Until there are two minutes of readings it says it is measuring rather than guess, and a window that resets starts its history over.
 
+## Budgets as a share of the plan
+
+On a Pro or Max plan, dollars are not what runs out: the 5 hour and weekly windows are. So a budget can be a share of one, `2% week` or `10% 5h`, and the dashboard reads in shares of the week. Dollars at API prices remain for accounts without plan limits.
+
+* **The plan never says how big a window is.** The API reports only how much of it the account has used, to a tenth of a percent. TokenMunim learns what one percent is worth on this account: it pairs each reading of a window with this session's cost at that moment, and adds the percent moved and the dollars spent between two readings as evidence. Percent per dollar is the rate.
+* **Only stretches it watched.** Two readings more than five minutes apart are left out: in a gap another session, or a chat in the browser, could have used the plan, and that is not this session's doing. A new window starts this session's share of it over, and keeps the rate.
+* **Measured tick to tick.** The percent arrives rounded: to a tenth at best, and on some plans to a whole point. Between two moments the percent moved while watched, the account used exactly the steps between them, so evidence runs from one such tick to the next and the rounding never enters it. The first tick only starts the clock. One measured step is enough to begin, and every later step sharpens the rate. The 5 hour window moves fast and is learned within minutes; on a plan that reports whole points, the week needs two of them, which can take a long session.
+* **A whole session counts.** A session that began inside the current window counts whole at the learned rate, including what it spent before the window was first read. One that began before the window started counts from the window's first reading.
+* **Until then.** Before a rate is learned the dashboard shows tokens, share budgets wait, and the session tiles show how far the account moved, marked as measuring, never a bare 0%.
+* **Kept for the next session.** A learned rate is saved in the plugin's store at the end of each turn, so the next session is measured from its first reply, until it has learned its own.
+* **Own usage only.** A task's share is its own cost at the learned rate, never the account's movement. Other sessions running on the same plan at the same time can't eat into a task's budget, and if they inflate the evidence while it is learned, the rate only comes out stricter.
+* **Weighed like the price.** Cost weighs tokens the way they are priced: a cache read is a tenth of a fresh input token, an output token five times one. A raw token count would let a long cached context swamp the measure; in one long session here, 132M of 133M tokens were cache reads.
+* **Never more than what's left.** A task asking for 5% of a week that has 3% left gets 3%.
+
 ## Acting from the pane
 
 Each button on a circuit card is a pure function on the book, recorded on the trip it answers:
 
-* **Raise budget** adds half the task's budget (at least five cents). A task halted for its budget can carry on; one the agent already left stays closed.
+* **Raise budget** adds half the task's budget: at least a tenth of a percent for a share, five cents for dollars. A task halted for its budget can carry on; one the agent already left stays closed.
 * **Allow once** adds a pass. The next call that a circuit would stop uses the pass up instead, and goes through.
 * **Skip task** halts the task, so the agent's next call there is told to move on.
 
@@ -77,7 +91,9 @@ Each button on a circuit card is a pure function on the book, recorded on the tr
 * **Fits any width.** The pane is laid out for the columns it actually has, in three tiers. As it narrows, the task table drops its tokens column and then its calls column, activity rows shorten their timestamps, tab labels lose their counts and then shorten, and every bar stretches or shrinks. Text is cut to fit, never padded past its frame. A test draws every tab at four widths on both surfaces.
 * **Fixed frames.** The overview fits itself to the pane's visible rows: it trims the task list first, then folds the recent activity, the token mix and the burn chart, in that order, into one line summaries. No list ever grows past its frame, and older rows live in the ledger file.
 * **The person's choice wins.** The view remembers what the person folded and what they opened. The pane only ever folds sections the person has not opened, so a section they open stays open, and if they open more than fits, the pane scrolls. The first version folded a section straight back after it was opened whenever room was short, which made the fold arrows look dead; a test now clicks every section at four pane sizes.
-* **Color carries meaning only.** Gold is the ledger, green is healthy, amber is close, red is over. Everything else is muted.
+* **Color carries meaning only.** Gold is the ledger, white is this session's slice of a limit, green is healthy, amber is close, red is over. Everything else is muted.
+* **One button, where nothing hides it.** `/munim` puts a TokenMunim button at the end of the line under the prompt. It first lived in the band above the prompt, where the engine draws its own `[-]` beside every plugin's tree, and one click there hid the button with no way back the person could see.
+* **Nothing clickable by the close mark.** The pane's frame draws its own × at the top right corner. The ledger link first sat right beside it, so a slip closed the pane instead of opening the ledger; the link now lives in the footer, and the header's right side holds only status.
 * **One source of truth.** The pane reads the same book the circuit breaker writes, so what you see is what the rules acted on.
 
 ## Testing

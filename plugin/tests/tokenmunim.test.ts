@@ -13,19 +13,25 @@ import {
   emptyBook,
   fingerprint,
   haltIfOver,
+  learnedRates,
   limitsFrom,
   nameAgents,
   normalize,
   startTask,
+  parseBudget,
   parseMarker,
+  planRate,
   raiseBudget,
   record,
+  resolveBudget,
   runway,
+  seedPrior,
   setLimits,
   skipTask,
   statement,
   summarize,
   tokenRate,
+  windowShare,
 } from '../hooks/ledger'
 import type { Usage } from '../hooks/ledger'
 import { migrateView } from '../hooks/pane'
@@ -259,7 +265,8 @@ test('books cost to the open task and writes a statement', () => {
 test('an older book is brought up to date and its general task un-halted', () => {
   const v1 = { khatas: [{ id: 'general', name: 'general', status: 'halted', usd: 1.2, budgetUsd: 1, calls: 4, fails: 0, blocked: 1, openedAt: 0 }], entries: [], active: 'general', lastUsd: 1.2, samples: [], streaks: {}, burnPausedUntil: 0, saved: 0 }
   const b = normalize(v1 as never)
-  expect(b.v).toBe(6)
+  expect(b.v).toBe(7)
+  expect(b.meter).toEqual({})
   expect(b.trips).toEqual([])
   expect(b.agents).toEqual([])
   expect(b.mix.cacheRead).toBe(0)
@@ -276,7 +283,7 @@ test('a book from before plain words keeps its tasks, activity and trips', () =>
     active: 'strategy-6-1', lastUsd: 0.14, samples: [], tokens: 163_000, tokenSamples: [], rateLimits: [], streaks: {}, burnPausedUntil: 0, saved: 0,
   }
   const b = normalize(v4 as never)
-  expect(b.v).toBe(6)
+  expect(b.v).toBe(7)
   expect(b.tasks[0]?.name).toBe('strategy 6')
   expect(b.entries[0]?.task).toBe('strategy-6-1')
   expect(b.trips[0]?.task).toBe('strategy 6')
@@ -310,7 +317,7 @@ test('writes token counts the way a person reads them', () => {
 })
 
 test('reads task markers from a shell line', () => {
-  expect(parseMarker('munim:task iron condor 0.4')).toEqual({ verb: 'task', name: 'iron condor', budgetUsd: 0.4 })
+  expect(parseMarker('munim:task iron condor 0.4')).toEqual({ verb: 'task', name: 'iron condor', budget: { usd: 0.4 } })
   expect(parseMarker("echo 'munim:task short straddle'")).toEqual({ verb: 'task', name: 'short straddle' })
   expect(parseMarker('munim:end')).toEqual({ verb: 'end' })
   expect(parseMarker('ls munim:task')).toBe(null)
@@ -557,12 +564,12 @@ test('every number on screen is a fact: calls stopped, not money saved', async (
   await ui.unmount()
 })
 
-// ---- the bar above the prompt ----------------------------------------------------
+// ---- the button under the prompt ----------------------------------------------------
 
 const BAND = {
   plugin: 'tokenmunim',
-  component: 'AbovePrompt' as const,
-  props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 150, scroll: { offset: 0, bodyRows: 4 } } as never,
+  component: 'SessionMode' as const,
+  props: { modes: [] } as never,
   viewport: { columns: 155, rows: 50 },
 }
 
@@ -578,8 +585,8 @@ function panes(on: On) {
     return { value: undefined as never }
   })
   on('ui.panes', async () => ({ value: [...open].map(id => ({ id, title: 'TokenMunim', isShown: true, isFocused: false, isPlaced: true })) as never }))
-  // The engine's own band, empty: what shows when TokenMunim's bar is off.
-  on('ui.render', { component: 'AbovePrompt' }, async () => h('Box', {}) as never)
+  // The engine's own mode labels, none: what shows when TokenMunim's button is off.
+  on('ui.render', { component: 'SessionMode' }, async () => h('Box', {}) as never)
   return open
 }
 
@@ -625,4 +632,160 @@ test('while the dashboard is open the button carries the cross, and drops it how
   const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await pane.find({ key: 'pane-close' })).toBeUndefined()
   await pane.unmount()
+})
+
+// ---- budgets as a share of the plan ------------------------------------------------
+
+const near6 = (a: number | undefined, b: number) => a !== undefined && Math.abs(a - b) < 1e-6
+const week = (pct: number, resetsAt = '2026-10-10T00:00:00.000Z') => [{ kind: 'seven_day', percentUsed: pct, resetsAt }]
+
+test('a budget reads as a share of the plan or as dollars', () => {
+  expect(parseBudget('2% week')).toEqual({ pct: 2, window: 'seven_day' })
+  expect(parseBudget('2%')).toEqual({ pct: 2, window: 'seven_day' })
+  expect(parseBudget('10% 5h')).toEqual({ pct: 10, window: 'five_hour' })
+  expect(parseBudget('0.5% of my week')).toEqual({ pct: 0.5, window: 'seven_day' })
+  expect(parseBudget('$0.50')).toEqual({ usd: 0.5 })
+  expect(parseBudget(0.4)).toEqual({ usd: 0.4 })
+  expect(parseBudget('lots')).toBeUndefined()
+  expect(parseMarker('munim:task review 2% week')).toEqual({ verb: 'task', name: 'review', budget: { pct: 2, window: 'seven_day' } })
+  expect(limitsFrom({}).taskBudget).toEqual({ pct: 1, window: 'seven_day' })
+  expect(limitsFrom({ taskBudgetUsd: 2 }).taskBudget).toEqual({ usd: 2 })
+  // An API key has no plan windows: a share falls back to dollars there.
+  expect(resolveBudget(emptyBook(), { pct: 1, window: 'seven_day' }, 1)).toEqual({ usd: 1 })
+})
+
+test('the meter learns what a percent of the week is worth, and leaves out what it did not watch', () => {
+  let b = setLimits(bookCost(emptyBook(), 0, 0), week(10), 0)
+  // The first move is a tick to measure from; each move after it is evidence.
+  b = setLimits(bookCost(b, 0.2, 60_000), week(10.1), 60_000)
+  expect(planRate(b, 'seven_day')).toBeUndefined()
+  b = setLimits(bookCost(b, 0.6, 120_000), week(10.3), 120_000)
+  b = setLimits(bookCost(b, 1, 180_000), week(10.5), 180_000)
+  expect(near6(planRate(b, 'seven_day'), 0.5)).toBe(true)
+  // Away for an hour while another session used 3% of the week: not this session's doing.
+  b = setLimits(bookCost(b, 1, 3_780_000), week(13.5), 3_780_000)
+  b = setLimits(bookCost(b, 2, 3_840_000), week(14), 3_840_000)
+  b = setLimits(bookCost(b, 3, 3_900_000), week(14.5), 3_900_000)
+  expect(near6(planRate(b, 'seven_day'), 0.5)).toBe(true)
+  expect(near6(windowShare(b, 'seven_day')?.pct, 1.5)).toBe(true)
+  expect(near6(learnedRates(b).seven_day?.usd, 1.8)).toBe(true)
+  // A new week starts this session's share of it over; the rate stays.
+  b = setLimits(bookCost(b, 3.5, 3_960_000), week(0.3, '2026-10-17T00:00:00.000Z'), 3_960_000)
+  expect(windowShare(b, 'seven_day')).toEqual({ pct: 0, measured: true })
+})
+
+test('a session that began inside the week counts whole, even before the meter first read it', () => {
+  // Hours of work booked before TokenMunim learned to read the plan.
+  let b = startTask(bookCost(bookCost(emptyBook(), 0, 0), 0, 1_000), 'earlier', 0, 1_000)[0]
+  b = bookCost(b, 60, 3_600_000)
+  const resetsAt = new Date(3_600_000 + 3 * 86_400_000).toISOString()
+  b = setLimits(b, week(80, resetsAt), 3_600_000)
+  b = setLimits(bookCost(b, 61, 3_630_000), week(80.1, resetsAt), 3_630_000)
+  b = setLimits(bookCost(b, 62, 3_660_000), week(80.2, resetsAt), 3_660_000)
+  // A tenth a dollar: the whole $62 is 6.2% of the week, not the last dollar's tenth.
+  expect(near6(windowShare(b, 'seven_day')?.pct, 6.2)).toBe(true)
+})
+
+test('a rate learned in an earlier session measures a new one from its first reply', () => {
+  let b = seedPrior(bookCost(emptyBook(), 0, 0), { seven_day: { pct: 1, usd: 2 } })
+  b = setLimits(b, week(50), 0)
+  b = setLimits(bookCost(b, 1, 30_000), week(50), 30_000)
+  expect(windowShare(b, 'seven_day')).toEqual({ pct: 0.5, measured: true })
+  expect(learnedRates(b)).toEqual({})
+})
+
+test('a share budget counts only its own task, whatever other sessions use', () => {
+  let b = setLimits(bookCost(emptyBook(), 0, 0), week(10), 0)
+  b = setLimits(bookCost(b, 0.2, 30_000), week(10.1), 30_000)
+  b = setLimits(bookCost(b, 0.8, 60_000), week(10.4), 60_000)
+  b = startTask(b, 'review', { pct: 1, window: 'seven_day' }, 60_000)[0]
+  // Another session takes 5% of the week while this one waits.
+  b = haltIfOver(setLimits(bookCost(b, 0.8, 1_000_000), week(15.4), 1_000_000), 1_000_000)
+  expect(b.tasks.find(k => k.name === 'review')?.status).toBe('open')
+  b = haltIfOver(setLimits(bookCost(b, 1.8, 1_030_000), week(15.9), 1_030_000), 1_030_000)
+  expect(b.tasks.find(k => k.name === 'review')?.status).toBe('open')
+  // The task's own $2 is 1% of the week: its whole budget.
+  b = haltIfOver(setLimits(bookCost(b, 2.8, 1_060_000), week(16.4), 1_060_000), 1_060_000)
+  const review = b.tasks.find(k => k.name === 'review')
+  expect(review?.status).toBe('halted')
+  expect(review?.haltReason).toContain('of the week')
+  expect(b.trips[b.trips.length - 1]?.reason).toContain('1% budget')
+  // A share is never more than what is left of the week.
+  expect(startTask(setLimits(b, week(99.5), 1_040_000), 'big', { pct: 5, window: 'seven_day' }, 1_040_000)[1].budgetPct).toBe(0.5)
+})
+
+// A plan account: both windows move as the session spends.
+function planWorld(on: On) {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  mock.store(on)
+  const state = { usd: 0, week: 40, five: 10 }
+  const weekReset = new Date(1_000_000 + 3 * 86_400_000).toISOString()
+  const fiveReset = new Date(1_000_000 + 3 * 3_600_000).toISOString()
+  on('session.usage', async () => ({
+    value: {
+      startedAt: 0,
+      cost: { usd: state.usd },
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: state.five, resetsAt: fiveReset },
+        { kind: 'seven_day', percentUsed: state.week, resetsAt: weekReset },
+      ],
+    } as unknown as SessionUsage,
+  }))
+  on('tool.call', async () => ({ result: 'ok' }))
+  return { clock, state }
+}
+
+test('on a plan, the overview reads in shares of the week, not dollars', async ($, on) => {
+  const { clock, state } = planWorld(on)
+  await $.tool.call({ tool: 'Bash', command: 'ls', description: 'Look around' })
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'review', budget: '2% week' })
+  for (let i = 0; i < 6; i++) {
+    state.usd += 0.5
+    state.week += 0.25
+    state.five += 2
+    await clock.advance(30_000)
+    await $.tool.call({ tool: 'Bash', command: `python run.py ${i}`, description: `Step ${i}` })
+  }
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const width of [40, 66, 96]) {
+      const ui = await $.ui.mount({ ...PANE, surface, props: { ...(PANE.props as object), bodyColumns: width } as never })
+      expect(await ui.find({ type: 'Text', text: /WEEK USED/ })).toBeDefined()
+      // $3 of work at half a percent a dollar, and the 5 hour window's share beside it.
+      expect(await ui.find({ type: 'Text', text: /^1\.5%$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^12\.0%$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /of 2% budget|75%/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /SPENT|\$/ })).toBeUndefined()
+      // The ledger link sits in the footer, away from the pane's close mark.
+      await ui.unmount()
+    }
+  }
+})
+
+test('while it learns the rate, a plan account sees tokens, never dollars', async ($, on) => {
+  const { clock, state } = planWorld(on)
+  await $.tool.call({ tool: 'Bash', command: 'ls', description: 'Look around' })
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'review', budget: '2% week' })
+  state.usd += 0.5
+  state.five += 1
+  await clock.advance(30_000)
+  await $.tool.call({ tool: 'Bash', command: 'python run.py', description: 'Run it' })
+  for (const width of [40, 66, 96]) {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...(PANE.props as object), bodyColumns: width } as never })
+    expect(await ui.find({ type: 'Text', text: /measuring/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\$/ })).toBeUndefined()
+    // Never a bare 0%: a slice too small for the account's tenths reads <0.1%.
+    expect(await ui.find({ type: 'Text', text: /^<0\.1%$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^0%$/ })).toBeUndefined()
+    await ui.unmount()
+  }
+})
+
+test('the button keeps the mode labels the line already shows', async ($, on) => {
+  world(on)
+  panes(on)
+  await $.command.run({ command: 'munim', args: '' })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal', props: { modes: ['focus'] } as never })
+  expect(await ui.find({ type: 'Text', text: /focus/ })).toBeDefined()
+  expect(String((await ui.find({ key: 'bar-toggle' }))?.props.label).trim()).toBe('TokenMunim')
+  await ui.unmount()
 })
