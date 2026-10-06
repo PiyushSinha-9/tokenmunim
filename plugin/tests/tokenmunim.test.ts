@@ -663,3 +663,20 @@ test('the ledger link sits in the footer, away from the close mark of the pane f
   expect(await ui.find({ key: 'pane-close' })).toBeUndefined()
   await ui.unmount()
 })
+
+test('a finished task offers no skip on its old alerts', async ($, on) => {
+  const { clock, state } = world(on)
+  await $.tool.call({ tool: 'mcp__tokenmunim__start_task', name: 'chain data', budget_usd: 5 })
+  state.failing = true
+  for (let i = 0; i < 4; i++) {
+    await $.tool.call({ tool: 'Bash', command: 'python fetch.py' })
+    await clock.advance(1_000)
+  }
+  state.failing = false
+  await $.tool.call({ tool: 'mcp__tokenmunim__end_task' })
+  const ui = await $.ui.mount(at('terminal', 66, 44))
+  await ui.press({ key: 'fold-alerts' })
+  expect(await ui.find({ key: 'trip-latest-allow-btn' })).toBeDefined()
+  expect(await ui.find({ key: 'trip-latest-skip-btn' })).toBeUndefined()
+  await ui.unmount()
+})

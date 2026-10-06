@@ -503,7 +503,8 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         buttons.push(action(`${key}-raise-btn`, `+${money(by)} budget`, () => act.raise(task.id, by), true))
       }
       buttons.push(action(`${key}-allow-btn`, 'Allow once', () => act.allow(), false))
-      if ((t.kind === 'loop' || t.kind === 'burn') && task && task.id !== GENERAL && task.status !== 'halted') {
+      // Only a task still running can be skipped; a finished one has nothing left to skip.
+      if ((t.kind === 'loop' || t.kind === 'burn') && task && task.id !== GENERAL && task.status === 'open') {
         buttons.push(action(`${key}-skip-btn`, narrow ? 'Skip' : 'Skip task', () => act.skip(task.id), false))
       }
     }

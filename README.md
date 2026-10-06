@@ -35,6 +35,10 @@ TokenMunim answers three questions while the agent works, not after:
 
 A trip blocks one call and says why, so the agent can recover. It never ends the session, and it never blocks the tools an agent needs to get itself unstuck.
 
+<p align="center">
+  <img src="docs/screenshots/dashboard-alerts.png" width="640" alt="Three circuit trips from one run: a task halted over its budget, a burn spike paused, and a retry loop blocked, each with its own buttons">
+</p>
+
 **Per agent accounting.** Every reply is booked to the loop that made it, the main agent or a subagent, with its own tokens, cost, steps and cache hit rate. When a run fans out, you can see which subagent did the spending.
 
 **Plan limits and runway.** How much of your 5 hour and weekly limits is left, and whether the last twenty minutes' pace lasts until the reset: `✓ lasts`, or `⚠ out in 42m` while there is still time to slow down.
