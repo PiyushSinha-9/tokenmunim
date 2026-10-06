@@ -6,12 +6,8 @@ export type Task = {
   status: TaskStatus
   usd: number
   tokens: number
-  // 0 means no budget in dollars: the general task, which catches unassigned
-  // work, or a task whose budget is a share of the plan instead.
+  // 0 means no budget: the general task, which catches unassigned work.
   budgetUsd: number
-  // A budget as a share of a plan window: 2 means 2% of the week.
-  budgetPct?: number
-  budgetWindow?: PlanWindow
   calls: number
   fails: number
   blocked: number
@@ -76,29 +72,8 @@ export type AgentLedger = {
   lastAt: number
 }
 
-// The plan windows a budget can be a share of.
-export type PlanWindow = 'seven_day' | 'five_hour'
-
-// What TokenMunim has learned about one plan window: how far the account's
-// percent moved while this session spent, over the stretches it watched both.
-export type Meter = {
-  // The latest reading: the account's percent, this session's cost, and when.
-  last?: { at: number; pct: number; usd: number; resetsAt?: string }
-  // The last time the percent moved while watched: evidence runs from one
-  // such tick to the next, so the percent's rounding never enters it.
-  tick?: { pct: number; usd: number }
-  // The evidence: percent moved and dollars spent at API prices, gaps left out.
-  pct: number
-  usd: number
-  // Where this session stood when the current window was first seen.
-  firstPct?: number
-  windowUsd: number
-  // The rate earlier sessions learned, until this one has learned its own.
-  prior?: { pct: number; usd: number }
-}
-
 export type Book = {
-  v: 7
+  v: 6
   tasks: Task[]
   entries: Entry[]
   trips: Trip[]
@@ -115,7 +90,6 @@ export type Book = {
   burnPausedUntil: number
   // Calls the person let through a tripped circuit from the pane.
   passes: number
-  meter: Partial<Record<PlanWindow, Meter>>
 }
 
 export type Tab = 'overview' | 'tasks' | 'activity' | 'alerts' | 'agents'

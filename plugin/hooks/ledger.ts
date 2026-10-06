@@ -7,9 +7,7 @@ import type {
   Entry,
   Task,
   LimitSample,
-  Meter,
   Outcome,
-  PlanWindow,
   RateWindow,
   Sample,
   SessionSummary,
@@ -19,15 +17,9 @@ import type {
   TripKind,
 } from '../types'
 
-// A budget in dollars at API prices, or as a share of a plan window.
-export type Budget = { usd: number } | { pct: number; window: PlanWindow }
-
 export type Limits = {
-  taskBudget: Budget
-  sessionBudget: Budget
-  // What a share becomes on an account without plan limits (an API key).
-  taskFallbackUsd: number
-  sessionFallbackUsd: number
+  taskBudgetUsd: number
+  sessionBudgetUsd: number
   loopLimit: number
   burnLimitUsdPerMin: number
 }
@@ -56,7 +48,7 @@ export const RUNWAY_WINDOW_MS = 20 * 60_000
 const emptyMix = (): TokenMix => ({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0 })
 
 export const emptyBook = (): Book => ({
-  v: 7,
+  v: 6,
   tasks: [],
   entries: [],
   trips: [],
@@ -72,7 +64,6 @@ export const emptyBook = (): Book => ({
   streaks: {},
   burnPausedUntil: 0,
   passes: 0,
-  meter: {},
 })
 
 // A book as older versions saved it. Before version 5 a task was a "khata",
@@ -91,14 +82,13 @@ type OlderBook = Partial<Omit<Book, 'v' | 'tasks' | 'entries' | 'trips'>> & {
 // Brings a book written by an older version up to this one. Version 2 took the
 // budget off the general task (lifting a budget halt on it), version 3 counts
 // tokens, version 4 adds agents, the token mix and the limit history, and
-// version 5 names things in plain words: tasks, activity, the ledger,
-// version 6 carries those words into alert text saved before them, and
-// version 7 meters the plan, so budgets can be a share of it.
+// version 5 names things in plain words: tasks, activity, the ledger, and
+// version 6 carries those words into alert text saved before them.
 export const normalize = (book: OlderBook | Book | undefined | null): Book => {
-  if (book && book.v === 7) return book as Book
+  if (book && book.v === 6) return book as Book
   const src = (book ?? {}) as OlderBook
   const { khatas: _oldTasks, saved: _oldEstimate, ...current } = src
-  const base = { ...emptyBook(), ...current, v: 7 as const }
+  const base = { ...emptyBook(), ...current, v: 6 as const }
   const tasks = (src.tasks ?? src.khatas ?? []).map(t => {
     const counted: Task = { ...t, tokens: t.tokens ?? 0 }
     return t.id === GENERAL && (src.v ?? 1) < 2
@@ -126,7 +116,6 @@ export const normalize = (book: OlderBook | Book | undefined | null): Book => {
     rateLimits: src.rateLimits ?? [],
     limitSamples: src.limitSamples ?? {},
     passes: src.passes ?? 0,
-    meter: src.meter ?? {},
   }
 }
 
@@ -135,14 +124,9 @@ export const limitsFrom = (options: Readonly<Record<string, unknown>>): Limits =
     const value = Number(options[key])
     return Number.isFinite(value) && value > 0 ? value : fallback
   }
-  // A setting from before shares were possible was a number of dollars.
-  const budget = (key: string, legacy: string, fallback: Budget): Budget =>
-    parseBudget(options[key]) ?? parseBudget(options[legacy] === undefined ? undefined : Number(options[legacy])) ?? fallback
   return {
-    taskBudget: budget('taskBudget', 'taskBudgetUsd', { pct: 1, window: 'seven_day' }),
-    sessionBudget: budget('sessionBudget', 'sessionBudgetUsd', { pct: 20, window: 'seven_day' }),
-    taskFallbackUsd: 1,
-    sessionFallbackUsd: 20,
+    taskBudgetUsd: num('taskBudgetUsd', 1),
+    sessionBudgetUsd: num('sessionBudgetUsd', 20),
     loopLimit: Math.max(2, Math.round(num('loopLimit', 3))),
     burnLimitUsdPerMin: num('burnLimitUsdPerMin', 2),
   }
@@ -152,13 +136,13 @@ export const money = (n: number) => `$${n.toFixed(2)}`
 
 // ---- tasks ----------------------------------------------------------------
 
-const newTask = (id: string, name: string, budget: Pick<Task, 'budgetUsd' | 'budgetPct' | 'budgetWindow'>, now: number): Task => ({
+const newTask = (id: string, name: string, budgetUsd: number, now: number): Task => ({
   id,
   name,
   status: 'open',
   usd: 0,
   tokens: 0,
-  ...budget,
+  budgetUsd,
   calls: 0,
   fails: 0,
   blocked: 0,
@@ -177,25 +161,21 @@ export const activeTask = (book: Book, now: number): [Book, Task] => {
   if (open) return [book, open]
   const general = book.tasks.find(k => k.id === GENERAL)
   if (general) return [{ ...book, active: GENERAL }, general]
-  const made = newTask(GENERAL, 'general', { budgetUsd: 0 }, now)
+  const made = newTask(GENERAL, 'general', 0, now)
   return [{ ...book, active: GENERAL, tasks: [...book.tasks, made] }, made]
 }
 
 export const haltedNamed = (book: Book, name: string): Task | undefined =>
   book.tasks.find(k => k.status === 'halted' && k.name.toLowerCase() === name.toLowerCase())
 
-export const startTask = (book: Book, name: string, budget: Budget | number, now: number): [Book, Task] => {
+export const startTask = (book: Book, name: string, budgetUsd: number, now: number): [Book, Task] => {
   // Opening the task that is already open carries on with it.
   const current = book.tasks.find(k => k.id === book.active)
   if (current && current.status === 'open' && current.name === name) return [book, current]
   const closed = endTask(book)
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'task'
   const id = `${slug}-${closed.tasks.length + 1}`
-  const b: Budget = typeof budget === 'number' ? { usd: budget } : budget
-  // A share is never more than what is left of its window.
-  const left = 'pct' in b ? 100 - (book.rateLimits.find(w => w.kind === b.window)?.percentUsed ?? 0) : 0
-  const fields = 'pct' in b ? { budgetUsd: 0, budgetPct: Math.max(0.1, Math.min(b.pct, left)), budgetWindow: b.window } : { budgetUsd: b.usd }
-  const made = newTask(id, name, fields, now)
+  const made = newTask(id, name, budgetUsd, now)
   return [{ ...closed, active: id, tasks: [...closed.tasks, made] }, made]
 }
 
@@ -354,180 +334,7 @@ export const setLimits = (book: Book, windows: readonly RateWindow[] | undefined
     const fresh = last !== undefined && w.percentUsed < last.pct ? [] : kept
     limitSamples[w.kind] = [...fresh, { at: now, pct: w.percentUsed }].slice(-200)
   }
-  if (book.lastUsd === null) return { ...book, rateLimits, limitSamples }
-  const meter = { ...book.meter }
-  for (const w of rateLimits) {
-    if (w.kind === 'seven_day' || w.kind === 'five_hour') meter[w.kind] = meterAfter(meter[w.kind], w, book.lastUsd, now)
-  }
-  return { ...book, rateLimits, limitSamples, meter }
-}
-
-// ---- the plan: what a share of a window is worth -------------------------------
-
-// The account's percent moves in tenths. Between two moments it moved, the
-// account used exactly the steps between them, so one step measured that way
-// is a fair rate, and every later step sharpens it. A reading this long after
-// the last may hide another session's use.
-export const MIN_EVIDENCE_PCT = 0.1
-export const METER_GAP_MS = 5 * 60_000
-const PLAN_WINDOWS: readonly PlanWindow[] = ['seven_day', 'five_hour']
-
-const movedWindow = (a: string | undefined, b: string | undefined) =>
-  a !== undefined && b !== undefined && Math.abs(Date.parse(a) - Date.parse(b)) > 10 * 60_000
-
-// One reading of a window. Evidence runs from one tick, a moment the percent
-// moved while this session was watching, to the next: a gap or a new window
-// drops the tick, and a new window starts this session's share of it over.
-const meterAfter = (m: Meter | undefined, w: RateWindow, usd: number, now: number): Meter => {
-  const cur: Meter = m ?? { pct: 0, usd: 0, windowUsd: usd }
-  const last = cur.last
-  const reading = { at: now, pct: w.percentUsed, usd, resetsAt: w.resetsAt ?? last?.resetsAt }
-  if (last === undefined || movedWindow(last.resetsAt, w.resetsAt) || w.percentUsed < last.pct - 0.05) {
-    return { ...cur, last: reading, tick: undefined, firstPct: w.percentUsed, windowUsd: usd }
-  }
-  const watched = now - last.at <= METER_GAP_MS && w.percentUsed >= last.pct && usd >= last.usd
-  if (!watched) return { ...cur, last: reading, tick: undefined }
-  if (w.percentUsed === last.pct) return { ...cur, last: reading }
-  const tick = { pct: w.percentUsed, usd }
-  if (cur.tick === undefined) return { ...cur, last: reading, tick }
-  // Percents come in tenths and dollars in cents: rounding keeps the sums exact.
-  const pct = Math.round((cur.pct + (w.percentUsed - cur.tick.pct)) * 1e4) / 1e4
-  const spent = Math.round((cur.usd + (usd - cur.tick.usd)) * 1e6) / 1e6
-  return { ...cur, last: reading, tick, pct, usd: spent }
-}
-
-const WINDOW_MS: Record<PlanWindow, number> = { seven_day: 7 * 24 * 3_600_000, five_hour: 5 * 3_600_000 }
-
-// When the session began: its first task, the general one included.
-const sessionStart = (book: Book): number | undefined =>
-  book.tasks.length > 0 ? Math.min(...book.tasks.map(k => k.openedAt)) : undefined
-
-// Percent of a window per dollar at API prices: this session's own rate once
-// it has seen enough, else the one an earlier session learned.
-export const planRate = (book: Book, window: PlanWindow): number | undefined => {
-  const m = book.meter[window]
-  if (m === undefined) return undefined
-  if (m.pct >= MIN_EVIDENCE_PCT && m.usd > 0) return m.pct / m.usd
-  return m.prior && m.prior.pct > 0 && m.prior.usd > 0 ? m.prior.pct / m.prior.usd : undefined
-}
-
-// This session's share of the window it is in: its own usage at the learned
-// rate, so other sessions never count against it. Until the rate is known,
-// how far the account moved, marked as not yet measured.
-export const windowShare = (book: Book, window: PlanWindow): { pct: number; measured: boolean } | undefined => {
-  const m = book.meter[window]
-  if (m?.last === undefined) return undefined
-  const rate = planRate(book, window)
-  if (rate !== undefined) {
-    // A session that began inside this window counts whole, even what it spent
-    // before the window was first read; one that began earlier counts from then.
-    const started = sessionStart(book)
-    const windowStart = m.last.resetsAt !== undefined ? Date.parse(m.last.resetsAt) - WINDOW_MS[window] : Number.NaN
-    const used = started !== undefined && started >= windowStart ? sessionUsd(book) : Math.max(0, (book.lastUsd ?? m.last.usd) - m.windowUsd)
-    return { pct: used * rate, measured: true }
-  }
-  return { pct: Math.max(0, m.last.pct - (m.firstPct ?? m.last.pct)), measured: false }
-}
-
-export const taskShare = (book: Book, task: Task, window: PlanWindow = 'seven_day'): number | undefined => {
-  const rate = planRate(book, window)
-  return rate === undefined ? undefined : task.usd * rate
-}
-
-export const hasBudget = (task: Task): boolean => (task.budgetPct ?? 0) > 0 || task.budgetUsd > 0
-
-// How far into its budget a task is, 1 being all of it; unknown for a share
-// until the rate is learned, and for a task with no budget.
-export const budgetUse = (book: Book, task: Task): number | undefined => {
-  if ((task.budgetPct ?? 0) > 0) {
-    const used = taskShare(book, task, task.budgetWindow ?? 'seven_day')
-    return used === undefined ? undefined : used / (task.budgetPct ?? 1)
-  }
-  return task.budgetUsd > 0 ? task.usd / task.budgetUsd : undefined
-}
-
-// A share the way a person reads it: 6.2%, 0.04%, 31%.
-export const share = (p: number): string => {
-  if (!(p > 0)) return '0%'
-  return `${Number(p < 0.1 ? p.toFixed(2) : p < 10 ? p.toFixed(1) : Math.round(p).toString())}%`
-}
-
-const WINDOW_SHORT: Record<PlanWindow, string> = { seven_day: 'week', five_hour: '5h' }
-const WINDOW_NOUN: Record<PlanWindow, string> = { seven_day: 'the week', five_hour: 'the 5 hour window' }
-
-export const budgetText = (budget: Budget): string => ('pct' in budget ? `${share(budget.pct)} of ${WINDOW_SHORT[budget.window]}` : money(budget.usd))
-
-export const budgetLabel = (task: Task): string =>
-  (task.budgetPct ?? 0) > 0 ? budgetText({ pct: task.budgetPct ?? 0, window: task.budgetWindow ?? 'seven_day' }) : task.budgetUsd > 0 ? money(task.budgetUsd) : 'none'
-
-// What a raise of `by` reads as for this task.
-export const stepLabel = (task: Task, by: number): string => ((task.budgetPct ?? 0) > 0 ? share(by) : money(by))
-
-const overText = (book: Book, task: Task): string => {
-  if ((task.budgetPct ?? 0) > 0) {
-    const w = task.budgetWindow ?? 'seven_day'
-    return `${share(taskShare(book, task, w) ?? 0)} of ${WINDOW_NOUN[w]}, over its ${share(task.budgetPct ?? 0)} budget`
-  }
-  return `${money(task.usd)} of its ${money(task.budgetUsd)} budget`
-}
-
-// "2% week", "10% 5h", "$0.50", 0.5: a share of a plan window, or dollars.
-export const parseBudget = (value: unknown): Budget | undefined => {
-  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? { usd: value } : undefined
-  if (typeof value !== 'string') return undefined
-  const text = value.trim().toLowerCase()
-  const pct = /^(\d+(?:\.\d+)?)\s*%\s*(?:of\s+)?(?:the\s+|my\s+|your\s+)?(week|weekly|wk|w|5h|5 ?hours?|5 ?hrs?|5 hour window)?$/.exec(text)
-  if (pct) {
-    const n = Number(pct[1])
-    if (!(n > 0)) return undefined
-    return { pct: Math.min(100, n), window: pct[2] !== undefined && pct[2].startsWith('5') ? 'five_hour' : 'seven_day' }
-  }
-  const usd = /^\$?\s*(\d+(?:\.\d+)?)\s*(?:usd|dollars?)?$/.exec(text)
-  if (!usd) return undefined
-  const n = Number(usd[1])
-  return n > 0 ? { usd: n } : undefined
-}
-
-// A share needs its window on the account; an API key has none, so a share
-// becomes the fallback in dollars there.
-export const resolveBudget = (book: Book, budget: Budget, fallbackUsd: number): Budget =>
-  'pct' in budget && !book.rateLimits.some(w => w.kind === budget.window) ? { usd: fallbackUsd } : budget
-
-// Rates learned by earlier sessions, so a new one is measured from its first reply.
-export const seedPrior = (book: Book, saved: unknown): Book => {
-  if (saved === null || typeof saved !== 'object') return book
-  const meter = { ...book.meter }
-  for (const w of PLAN_WINDOWS) {
-    const p = (saved as Record<string, { pct?: unknown; usd?: unknown } | undefined>)[w]
-    if (p && typeof p.pct === 'number' && typeof p.usd === 'number' && p.pct > 0 && p.usd > 0) {
-      meter[w] = { ...(meter[w] ?? { pct: 0, usd: 0, windowUsd: book.lastUsd ?? 0 }), prior: { pct: p.pct, usd: p.usd } }
-    }
-  }
-  return { ...book, meter }
-}
-
-// The rates this session learned well enough to keep for the next one.
-export const learnedRates = (book: Book): Partial<Record<PlanWindow, { pct: number; usd: number }>> => {
-  const out: Partial<Record<PlanWindow, { pct: number; usd: number }>> = {}
-  for (const w of PLAN_WINDOWS) {
-    const m = book.meter[w]
-    if (m && m.pct >= MIN_EVIDENCE_PCT && m.usd > 0) out[w] = { pct: m.pct, usd: m.usd }
-  }
-  return out
-}
-
-export const sessionBudgetOf = (book: Book, limits: Limits): Budget => resolveBudget(book, limits.sessionBudget, limits.sessionFallbackUsd)
-
-// Whether the session has used its budget, and how to say so.
-const sessionOver = (book: Book, limits: Limits): { used: string; budget: string } | null => {
-  const budget = sessionBudgetOf(book, limits)
-  if ('pct' in budget) {
-    const s = windowShare(book, budget.window)
-    if (s === undefined || !s.measured || s.pct < budget.pct - 1e-9) return null
-    return { used: `${share(s.pct)} of ${WINDOW_NOUN[budget.window]}`, budget: `${share(budget.pct)} of ${WINDOW_NOUN[budget.window]}` }
-  }
-  const spent = sessionUsd(book)
-  return spent >= budget.usd ? { used: money(spent), budget: money(budget.usd) } : null
+  return { ...book, rateLimits, limitSamples }
 }
 
 export type Runway =
@@ -620,12 +427,12 @@ export const check = (book: Book, fp: string, limits: Limits, now: number): [Boo
 const decide = (b: Book, task: Task, fp: string, limits: Limits, now: number): [Book, Verdict | null] => {
   const leave = 'Leave this task: do not reopen it under another task. Tell the user it hit its budget, then open a task for the next task with the start_task tool (load it with ToolSearch if it is not listed), or stop.'
 
-  const over = sessionOver(b, limits)
-  if (over !== null) {
+  const spent = sessionUsd(b)
+  if (spent >= limits.sessionBudgetUsd) {
     return [b, {
       kind: 'session',
-      short: `Session budget of ${over.budget} is used. Agent stopped.`,
-      reason: `The session budget of ${over.budget} is used (${over.used}). Stop and report to the user.`,
+      short: `Session budget of ${money(limits.sessionBudgetUsd)} is spent. Agent stopped.`,
+      reason: `The session budget of ${money(limits.sessionBudgetUsd)} is spent (${money(spent)}). Stop and report to the user.`,
     }]
   }
   if (task.status === 'halted') {
@@ -635,8 +442,8 @@ const decide = (b: Book, task: Task, fp: string, limits: Limits, now: number): [
       reason: `Task "${task.name}" is halted: ${task.haltReason ?? 'over budget'}. ${leave}`,
     }]
   }
-  if ((budgetUse(b, task) ?? 0) >= 1 - 1e-9) {
-    const why = overText(b, task)
+  if (task.budgetUsd > 0 && task.usd >= task.budgetUsd) {
+    const why = `${money(task.usd)} of its ${money(task.budgetUsd)} budget`
     const halted = withTask(b, task.id, k => ({ ...k, status: 'halted', haltReason: `spent ${why}` }))
     return [halted, {
       kind: 'budget',
@@ -673,21 +480,30 @@ export const isPending = (book: Book, trip: Trip, now: number): boolean => {
   return now - trip.at < 10 * 60_000 || task?.status === 'halted'
 }
 
-// How many things need the person: each halted task once, plus each recent loop or burn.
-export const pendingCount = (book: Book, now: number): number =>
-  new Set(
-    book.trips
-      .map((t, i) => ({ t, i }))
-      .filter(({ t }) => isPending(book, t, now))
-      .map(({ t, i }) => (t.kind === 'budget' || t.kind === 'halted' ? `task:${t.taskId ?? t.task}` : `alert:${i}`)),
-  ).size
+// What needs the person, newest first: each halted task once, with its latest
+// alert, and each recent loop or burn. The badge counts exactly these.
+export const pendingTrips = (book: Book, now: number): Trip[] => {
+  const seen = new Set<string>()
+  const out: Trip[] = []
+  for (let i = book.trips.length - 1; i >= 0; i--) {
+    const t = book.trips[i]
+    if (t === undefined || !isPending(book, t, now)) continue
+    const key = t.kind === 'budget' || t.kind === 'halted' ? `task:${t.taskId ?? t.task}` : `alert:${i}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(t)
+  }
+  return out
+}
+
+export const pendingCount = (book: Book, now: number): number => pendingTrips(book, now).length
 
 // A reply can carry a task past its budget between two tool calls. Halt it
 // then, so the very next call is stopped and the overspend shows as a trip.
 export const haltIfOver = (book: Book, now: number): Book => {
   const task = book.tasks.find(k => k.id === book.active)
-  if (!task || task.status !== 'open' || (budgetUse(book, task) ?? 0) < 1 - 1e-9) return book
-  const why = overText(book, task)
+  if (!task || task.status !== 'open' || !(task.budgetUsd > 0) || task.usd < task.budgetUsd) return book
+  const why = `${money(task.usd)} of its ${money(task.budgetUsd)} budget`
   const halted = withTask(book, task.id, k => ({ ...k, status: 'halted', haltReason: `spent ${why}` }))
   return addTrip(halted, {
     at: now,
@@ -713,17 +529,14 @@ const resolveLatest = (book: Book, taskId: string | undefined, text: string): Bo
 export const raiseBudget = (book: Book, taskId: string, by: number): Book => {
   const task = book.tasks.find(k => k.id === taskId)
   if (!task) return book
-  const isShare = (task.budgetPct ?? 0) > 0
-  const raised = isShare
-    ? { budgetPct: Math.round(((task.budgetPct ?? 0) + by) * 100) / 100 }
-    : { budgetUsd: Math.round((task.budgetUsd + by) * 100) / 100 }
+  const budgetUsd = Math.round((task.budgetUsd + by) * 100) / 100
   const lifted = withTask(book, taskId, k => ({
     ...k,
-    ...raised,
+    budgetUsd,
     status: k.status === 'halted' ? (book.active === k.id ? 'open' : 'closed') : k.status,
     haltReason: k.status === 'halted' ? undefined : k.haltReason,
   }))
-  return resolveLatest(lifted, taskId, `budget raised to ${budgetLabel({ ...task, ...raised })} by you`)
+  return resolveLatest(lifted, taskId, `budget raised to ${money(budgetUsd)} by you`)
 }
 
 // Lets the next call through whatever circuit stands in its way, once.
@@ -805,29 +618,16 @@ const stamp = (ms: number) => {
 }
 const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 8)
 const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ')
+const budgetText = (k: Task) => (k.budgetUsd > 0 ? money(k.budgetUsd) : 'none')
 const taskName = (book: Book, id: string) => book.tasks.find(k => k.id === id)?.name ?? id
 const agentName = (book: Book, id: string | undefined) => book.agents.find(a => a.id === (id ?? MAIN))?.name ?? 'main'
 const pct = (x: number) => `${Math.round(x * 100)}%`
 
-const weekOf = (book: Book, usd: number) => {
-  const rate = planRate(book, 'seven_day')
-  return rate === undefined ? '' : share(usd * rate)
-}
-
 const taskTable = (book: Book): string[] => [
-  '| Task | Status | Week | At API prices | Tokens | Budget | Calls | Fails | Blocked |',
-  '|---|---|--:|--:|--:|--:|--:|--:|--:|',
-  ...book.tasks.map(k => `| ${cell(k.name)} | ${k.status} | ${weekOf(book, k.usd)} | ${money(k.usd)} | ${compactTokens(k.tokens)} | ${budgetLabel(k)} | ${k.calls} | ${k.fails} | ${k.blocked} |`),
+  '| Task | Status | Spent | Tokens | Budget | Calls | Fails | Blocked |',
+  '|---|---|--:|--:|--:|--:|--:|--:|',
+  ...book.tasks.map(k => `| ${cell(k.name)} | ${k.status} | ${money(k.usd)} | ${compactTokens(k.tokens)} | ${budgetText(k)} | ${k.calls} | ${k.fails} | ${k.blocked} |`),
 ]
-
-// This session's share of the plan, in a sentence: "6.2% of the week and 31% of the 5 hour window".
-const planShares = (book: Book): string | undefined => {
-  const parts = PLAN_WINDOWS.flatMap(w => {
-    const s = windowShare(book, w)
-    return s?.measured ? [`${share(s.pct)} of ${WINDOW_NOUN[w]}`] : []
-  })
-  return parts.length > 0 ? parts.join(' and ') : undefined
-}
 
 const agentTable = (book: Book): string[] => [
   '| Agent | Model | Steps | Calls | Tokens | Cost (est.) | Cache hit |',
@@ -842,9 +642,7 @@ const limitLines = (book: Book, now: number): string[] =>
   book.rateLimits.map(w => {
     const r = runway(book, w.kind, now)
     const pace = r.state === 'runs-out' ? `, runs out in ${span(r.minutes)} at this pace` : r.state === 'lasts' ? ', lasts to its reset at this pace' : ''
-    const rate = w.kind === 'seven_day' || w.kind === 'five_hour' ? planRate(book, w.kind) : undefined
-    const worth = rate !== undefined ? `, 1% is about ${money(1 / rate)} at API prices` : ''
-    return `| ${windowName(w.kind)} | ${Math.max(0, 100 - w.percentUsed).toFixed(1)}% left${w.resetsAt ? `, resets ${stamp(Date.parse(w.resetsAt))}` : ''}${pace}${worth} |`
+    return `| ${windowName(w.kind)} | ${Math.max(0, 100 - w.percentUsed).toFixed(0)}% left${w.resetsAt ? `, resets ${stamp(Date.parse(w.resetsAt))}` : ''}${pace} |`
   })
 
 const tripTable = (book: Book): string[] =>
@@ -863,7 +661,7 @@ export const statement = (book: Book, limits: Limits, past: readonly SessionSumm
     lines.push('Nothing booked yet in this session.')
   } else {
     lines.push(
-      `**Used** ${planShares(book) ?? money(sessionUsd(book))} of a ${budgetText(sessionBudgetOf(book, limits))} budget  ·  **Tokens** ${compactTokens(book.tokens)} (cache hit ${pct(cacheHit(book.mix))})  ·  **Calls stopped** ${book.entries.filter(e => e.outcome === 'blocked').length}  ·  **Circuit trips** ${book.trips.length}`,
+      `**Spent** ${money(sessionUsd(book))} of ${money(limits.sessionBudgetUsd)}  ·  **Tokens** ${compactTokens(book.tokens)} (cache hit ${pct(cacheHit(book.mix))})  ·  **Calls stopped** ${book.entries.filter(e => e.outcome === 'blocked').length}  ·  **Circuit trips** ${book.trips.length}`,
       '',
       ...taskTable(book),
     )
@@ -893,9 +691,7 @@ export const ledgerMarkdown = (
     '',
     '| | |',
     '|---|--:|',
-    ...(planShares(book) !== undefined ? [`| This session used | ${planShares(book)} |`] : []),
-    `| Session budget | ${budgetText(sessionBudgetOf(book, meta.limits))} |`,
-    `| Cost at API prices | ${money(sessionUsd(book))} |`,
+    `| Spent | ${money(sessionUsd(book))} of ${money(meta.limits.sessionBudgetUsd)} |`,
     `| Tokens | ${compactTokens(book.tokens)} |`,
     `| Token mix | input ${compactTokens(m.input)}, cache read ${compactTokens(m.cacheRead)}, cache write ${compactTokens(m.cacheWrite)}, output ${compactTokens(m.output)} |`,
     `| Cache hit | ${pct(cacheHit(m))} |`,
@@ -933,13 +729,13 @@ export const ledgerMarkdown = (
 // A task marker: any agent or script can open or close a task through a
 // shell line, `munim:task <name> [budget]` or `munim:end`, even where the
 // start_task tool is not listed. TokenMunim answers it; the shell never runs it.
-export type Marker = { verb: 'task'; name: string; budget?: Budget } | { verb: 'end' }
+export type Marker = { verb: 'task'; name: string; budgetUsd?: number } | { verb: 'end' }
 
 export const parseMarker = (command: string): Marker | null => {
   const line = command.trim().replace(/^echo\s+/, '').replace(/^['"]|['"]$/g, '').trim()
   if (/^munim:end$/.test(line)) return { verb: 'end' }
-  const m = /^munim:task\s+(.+?)(?:\s+(\$?\d+(?:\.\d+)?(?:\s*%(?:\s*(?:week|weekly|wk|w|5h))?)?))?$/.exec(line)
+  const m = /^munim:task\s+(.+?)(?:\s+\$?(\d+(?:\.\d+)?))?$/.exec(line)
   if (!m || !m[1]) return null
-  const budget = parseBudget(m[2])
-  return budget === undefined ? { verb: 'task', name: m[1] } : { verb: 'task', name: m[1], budget }
+  const budget = m[2] === undefined ? undefined : Number(m[2])
+  return budget === undefined ? { verb: 'task', name: m[1] } : { verb: 'task', name: m[1], budgetUsd: budget }
 }

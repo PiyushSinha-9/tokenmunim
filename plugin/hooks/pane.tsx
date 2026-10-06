@@ -6,10 +6,9 @@
 // meaning. Every row is laid out for the width it actually has, and nothing is
 // ever padded past its panel.
 
-import type { AgentLedger, Book, Entry, PlanWindow, Task, Tab, Trip, View } from '../types'
+import type { AgentLedger, Book, Entry, Task, Tab, Trip, View } from '../types'
 import { brailleArea, sparkline } from './chart'
 import {
-  budgetUse,
   burnRate,
   burnSeries,
   cacheHit,
@@ -17,20 +16,16 @@ import {
   duration,
   GENERAL,
   MAIN,
-  hasBudget,
   isPending,
   mixTotal,
   money,
   pendingCount,
-  planRate,
+  pendingTrips,
   runway,
   sessionUsd,
-  share,
   span,
-  stepLabel,
   tokenRate,
   tokenSeries,
-  windowShare,
 } from './ledger'
 import type { Limits } from './ledger'
 
@@ -78,8 +73,6 @@ const GREEN = '#4ADE80'
 const GREEN_BG = '#1C3626'
 const AMBER = '#FBBF24'
 const RED = '#F87171'
-// This session, wherever its share of a limit shows.
-const SELF = '#F4F4F5'
 const RED_DIM = '#A04C4C'
 const RED_PANEL = '#3A2326'
 const BLUE = '#60A5FA'
@@ -150,10 +143,8 @@ const wrap = (text: string, width: number, lines: number): string[] => {
   return kept
 }
 
-// A step to raise a halted task by: half its budget, at least a tenth of a
-// percent for a share, five cents for dollars.
-export const raiseStep = (k: Task) =>
-  (k.budgetPct ?? 0) > 0 ? Math.max(0.1, Math.round((k.budgetPct ?? 0) * 5) / 10) : Math.max(0.05, Math.round(k.budgetUsd * 50) / 100)
+// A step to raise a halted task by: half its budget, at least five cents.
+export const raiseStep = (k: Task) => Math.max(0.05, Math.round(k.budgetUsd * 50) / 100)
 
 // Folds or opens a section from how it is drawn now: a section the pane folded
 // to fit opens on the first press, and stays open.
@@ -224,7 +215,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
 
   // The header is one row, like an app's title bar: the wordmark in two
   // tones, the tagline when there is room, and status on the right. Nothing
-  // clickable sits up here, next to the close mark of the pane's frame: the
+  // clickable sits up here, beside the close mark of the pane's frame: the
   // ledger link lives in the footer.
   const elapsed = d.startedAt && d.startedAt > 0 ? `session ${span((now - d.startedAt) / 60_000)}` : ''
   const TAGLINE = '  cost control for AI agents'
@@ -283,7 +274,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   // the open task. The hint gives way first when the row runs short.
   const LEDGER = 'ledger ↗'
   const activeText = active !== undefined ? `▸ ${active.name}` : ''
-  const footerBase = `${elapsed !== '' ? `${elapsed} · ` : ''}`
+  const footerBase = elapsed !== '' ? `${elapsed} · ` : ''
   const HINT = ' · /munim for commands'
   const footerUsed = footerBase.length + (d.hasFile ? LEDGER.length : 0) + Math.min(activeText.length, 16) + 2
   const footerHint = footerUsed + HINT.length <= inner ? HINT : ''
@@ -301,21 +292,6 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   )
 
   // ---- plan limits ---------------------------------------------------------
-
-  // On a plan, usage reads as a share of the week once TokenMunim has learned
-  // what a percent is worth here, and in tokens while it learns. Dollars at API
-  // prices are for accounts without plan limits.
-  const rateW = planRate(b, 'seven_day')
-  const weekShare = windowShare(b, 'seven_day')
-  const fiveShare = windowShare(b, 'five_hour')
-  const planMode = weekShare !== undefined || fiveShare !== undefined
-  const learning = planMode && rateW === undefined
-  const amount = (usd: number) => (rateW !== undefined ? share(usd * rateW) : learning ? '…' : money(usd))
-  const ofWeek = rateW !== undefined ? ' of week' : ''
-  const perTime = (usdPerMin: number) =>
-    rateW !== undefined ? `${share(usdPerMin * 60 * rateW)}/h` : learning ? 'measuring' : `${money(usdPerMin)}/min`
-  // A total: a share of the week, or tokens while the rate is learned.
-  const totalText = (usd: number, tokens: number) => (learning ? `${compactTokens(tokens)} tokens` : `${amount(usd)}${ofWeek}`)
 
   const plan = b.rateLimits.filter(w => w.kind === 'five_hour' || w.kind === 'seven_day')
   const windows = plan.length > 0 ? plan : b.rateLimits.filter(w => w.kind === 'spend_limit').slice(0, 1)
@@ -335,9 +311,6 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         const resetMs = w.resetsAt ? Date.parse(w.resetsAt) - now : NaN
         const r = runway(b, w.kind, now)
         const filled = fill(left / 100, limitBarW)
-        // This session's slice, in white, right where it came out of what was left.
-        const mine = w.kind === 'seven_day' ? weekShare : w.kind === 'five_hour' ? fiveShare : undefined
-        const mineW = mine && mine.pct > 0 ? Math.min(limitBarW - filled, Math.max(1, fill(mine.pct / 100, limitBarW))) : 0
         const pace =
           r.state === 'runs-out' ? { text: `⚠ out in ${span(r.minutes)}`, color: r.minutes < 30 ? RED : AMBER }
           : r.state === 'lasts' ? { text: '✓ lasts', color: GREEN }
@@ -347,8 +320,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
           <Box key={`limit-${w.kind}`}>
             <Text color={MUTED}>{pad(WINDOW_LABEL[w.kind] ?? w.kind, 6)}</Text>
             <Text color={color}>{'━'.repeat(filled)}</Text>
-            {mineW > 0 ? <Text color={SELF}>{'━'.repeat(mineW)}</Text> : null}
-            <Text color={LINE}>{'━'.repeat(limitBarW - filled - mineW)}</Text>
+            <Text color={LINE}>{'━'.repeat(limitBarW - filled)}</Text>
             <Text bold color={color}>{pad(` ${String(Math.round(left)).padStart(3)}% left`, 10)}</Text>
             <Text color={FAINT}>{pad(`  ↻ ${Number.isNaN(resetMs) ? '?' : countdown(resetMs)}`, 10)}</Text>
             {showPace ? <Text color={pace.color}>{cut(pace.text, 13)}</Text> : null}
@@ -369,30 +341,12 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   const perRow = inner >= 60 ? 4 : 2
   const cw = Math.floor((inner - (perRow - 1)) / perRow)
   const liveSpark = (series: number[]) => (series.some(v => v > 0) ? sparkline(series) : undefined)
-  type Tile = { key: string; label: string; value: string; color: string | undefined; caption: string; spark: string | undefined; sparkColor: string }
-  const sessionBudget = limits.sessionBudget
-  // A session's share of a window, against the session budget when the budget is that window.
-  const shareTile = (key: string, label: string, s: { pct: number; measured: boolean } | undefined, window: PlanWindow, spark: string | undefined): Tile => {
-    const cap = 'pct' in sessionBudget && sessionBudget.window === window ? sessionBudget.pct : undefined
-    const color = s && cap !== undefined && s.measured ? (s.pct >= cap ? RED : s.pct >= cap * 0.75 ? AMBER : SELF) : SELF
-    const caption = s === undefined ? 'after a reply' : !s.measured ? 'measuring' : cap !== undefined ? `of ${share(cap)} budget` : 'this session'
-    return { key, label, value: s === undefined ? '…' : tileShare(s.pct), color, caption, spark, sparkColor: GOLD }
-  }
-  // A tile's share always carries a tenth: 6.2%, 0.4%, and <0.1% for a slice
-  // the account's tenths have not caught yet, once this session has used anything.
-  const tileShare = (p: number) => (p >= 0.05 ? `${p.toFixed(1)}%` : spent > 0 ? '<0.1%' : '0.0%')
-  const burnSpark = liveSpark(burnSeries(b, now, 16, 45_000))
-  const tokensTile: Tile = { key: 'tokens', label: 'TOKENS/MIN', value: compactTokens(tokensPerMin), color: undefined, caption: `${compactTokens(b.tokens)} total`, spark: liveSpark(tokenSeries(b, now, 16, 45_000)), sparkColor: TEAL }
-  const stoppedTile: Tile = { key: 'stopped', label: 'STOPPED', value: String(blockedCount), color: blockedCount > 0 ? RED : undefined, caption: 'calls blocked', spark: undefined, sparkColor: GREEN }
-  const sessionCap = 'usd' in sessionBudget ? sessionBudget.usd : d.limits.sessionFallbackUsd
-  const tiles: Tile[] = planMode
-    ? [shareTile('week', 'WEEK USED', weekShare, 'seven_day', burnSpark), shareTile('five', '5H USED', fiveShare, 'five_hour', undefined), tokensTile, stoppedTile]
-    : [
-        { key: 'spent', label: 'SPENT', value: money(spent), color: undefined, caption: `${Math.round((spent / sessionCap) * 100)}% of ${dollars(sessionCap)}`, spark: undefined, sparkColor: GOLD },
-        { key: 'cost', label: 'COST/MIN', value: money(rate), color: rateColor, caption: `limit ${money(limit)}`, spark: burnSpark, sparkColor: rate > limit ? RED : GOLD },
-        tokensTile,
-        stoppedTile,
-      ]
+  const tiles = [
+    { key: 'spent', label: 'SPENT', value: money(spent), color: undefined as string | undefined, caption: `${Math.round((spent / limits.sessionBudgetUsd) * 100)}% of ${dollars(limits.sessionBudgetUsd)}`, spark: undefined as string | undefined, sparkColor: GOLD },
+    { key: 'cost', label: 'COST/MIN', value: money(rate), color: rateColor, caption: `limit ${money(limit)}`, spark: liveSpark(burnSeries(b, now, 16, 45_000)), sparkColor: rate > limit ? RED : GOLD },
+    { key: 'tokens', label: 'TOKENS/MIN', value: compactTokens(tokensPerMin), color: undefined, caption: `${compactTokens(b.tokens)} total`, spark: liveSpark(tokenSeries(b, now, 16, 45_000)), sparkColor: TEAL },
+    { key: 'stopped', label: 'STOPPED', value: String(blockedCount), color: (blockedCount > 0 ? RED : undefined) as string | undefined, caption: 'calls blocked', spark: undefined as string | undefined, sparkColor: GREEN },
+  ]
   const tileRows = [tiles.slice(0, perRow), tiles.slice(perRow)].filter(row => row.length > 0)
   const tilesBlock = (marginTop: number) => (
     <Box key="tiles" flexDirection="column" marginTop={marginTop}>
@@ -446,8 +400,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     }
     return runs
   }
-  const topLabel = rateW !== undefined ? share(scale * 60 * rateW) : learning ? '' : money(scale)
-  const gutterLabel = (r: number) => pad(r === limitRow ? 'limit' : r === 0 ? topLabel : r === chartH - 1 ? (planMode ? '0' : '$0') : '', gutter)
+  const gutterLabel = (r: number) => pad(r === limitRow ? 'limit' : r === 0 ? money(scale) : r === chartH - 1 ? '$0' : '', gutter)
   const burnBody = (
     <Box key="burn-body" flexDirection="column">
       {cells.map((row, r) => (
@@ -466,8 +419,8 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   )
   const burnRight = (
     <Box key="burn-right">
-      <Text color={rateColor ?? MUTED}>{`${perTime(rate)}${wide ? ofWeek : ''}`}</Text>
-      {!narrow && !learning ? <Text color={FAINT}>{` · peak ${perTime(peak)}`}</Text> : null}
+      <Text color={rateColor ?? MUTED}>{`${money(rate)}/min`}</Text>
+      {!narrow ? <Text color={FAINT}>{` · peak ${money(peak)}`}</Text> : null}
       {!narrow && overs > 0 ? <Text color={RED}>{' · over limit'}</Text> : null}
     </Box>
   )
@@ -545,9 +498,9 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     const bar = <Text color={t.resolved ? FAINT : RED}>{'▎'}</Text>
     const buttons: unknown[] = []
     if (live) {
-      if ((t.kind === 'budget' || t.kind === 'halted') && task && hasBudget(task)) {
+      if ((t.kind === 'budget' || t.kind === 'halted') && task && task.budgetUsd > 0) {
         const by = raiseStep(task)
-        buttons.push(action(`${key}-raise-btn`, `+${stepLabel(task, by)} budget`, () => act.raise(task.id, by), true))
+        buttons.push(action(`${key}-raise-btn`, `+${money(by)} budget`, () => act.raise(task.id, by), true))
       }
       buttons.push(action(`${key}-allow-btn`, 'Allow once', () => act.allow(), false))
       if ((t.kind === 'loop' || t.kind === 'burn') && task && task.id !== GENERAL && task.status !== 'halted') {
@@ -601,22 +554,19 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   // ---- task rows ----------------------------------------------------------
 
   // Columns drop in this order as the pane narrows: tokens, then calls.
-  // While the rate is learned, tokens lead and the separate tokens column goes.
-  const showTokens = C >= 58 && !learning
+  const showTokens = C >= 58
   const showCalls = C >= 46
   const BAR = C >= 46 ? 10 : 6
   const N = Math.max(6, C - 2 - 8 - (showTokens ? 7 : 0) - 1 - BAR - 6 - (showCalls ? 6 : 0) - 2)
   const taskHead = (
     <Text key="task-head" color={FAINT}>
-      {`  ${pad('TASK', N)}${lpad(rateW !== undefined ? 'WEEK' : learning ? 'TOKENS' : 'SPENT', 8)}${showTokens ? lpad('TOKENS', 7) : ''} ${pad('BUDGET', BAR)}${lpad('USED', 6)}${showCalls ? lpad('CALLS', 6) : ''}`}
+      {`  ${pad('TASK', N)}${lpad('SPENT', 8)}${showTokens ? lpad('TOKENS', 7) : ''} ${pad('BUDGET', BAR)}${lpad('USED', 6)}${showCalls ? lpad('CALLS', 6) : ''}`}
     </Text>
   )
   const taskRow = (k: Task, drill: boolean) => {
     const s = STATUS[k.status]
-    const use = budgetUse(b, k)
-    const isBudgeted = hasBudget(k) && use !== undefined
-    const isMeasuring = hasBudget(k) && use === undefined
-    const ratio = use ?? 0
+    const hasBudget = k.budgetUsd > 0
+    const ratio = hasBudget ? k.usd / k.budgetUsd : 0
     const over = ratio >= 1
     const filled = fill(ratio, BAR)
     const barColor = k.status === 'halted' || over ? RED : ratio >= 0.75 ? AMBER : GOLD
@@ -627,14 +577,13 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         <Box backgroundColor={isActive ? PANEL_HI : undefined}>
           <Text color={s.color}>{`${s.glyph} `}</Text>
           <Text bold={isActive} color={nameColor}>{pad(k.name, N)}</Text>
-          <Text bold={over} color={over ? RED : undefined}>{lpad(learning ? compactTokens(k.tokens) : amount(k.usd), 8)}</Text>
+          <Text bold={over} color={over ? RED : undefined}>{lpad(money(k.usd), 8)}</Text>
           {showTokens ? <Text color={MUTED}>{lpad(compactTokens(k.tokens), 7)}</Text> : null}
           <Text> </Text>
-          {isBudgeted ? <Text color={barColor}>{'━'.repeat(filled)}</Text> : null}
-          {isBudgeted ? <Text color={LINE}>{'━'.repeat(BAR - filled)}</Text> : null}
-          {isBudgeted ? <Text bold={over} color={over ? RED : MUTED}>{lpad(used(ratio), 6)}</Text> : null}
-          {isMeasuring ? <Text color={FAINT}>{pad('measuring', BAR + 6)}</Text> : null}
-          {!hasBudget(k) ? <Text color={FAINT}>{pad('no limit', BAR + 6)}</Text> : null}
+          {hasBudget ? <Text color={barColor}>{'━'.repeat(filled)}</Text> : null}
+          {hasBudget ? <Text color={LINE}>{'━'.repeat(BAR - filled)}</Text> : null}
+          {hasBudget ? <Text bold={over} color={over ? RED : MUTED}>{lpad(used(ratio), 6)}</Text> : null}
+          {!hasBudget ? <Text color={FAINT}>{pad('no limit', BAR + 6)}</Text> : null}
           {showCalls ? <Text color={MUTED}>{lpad(String(k.calls), 6)}</Text> : null}
           <Text> </Text>
           {drill ? link(`drill-${k.id}`, '›', () => act.drill(k.id)) : <Text> </Text>}
@@ -698,7 +647,11 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
   // ---- the tabs ------------------------------------------------------------
 
   const overview = () => {
-    const alertRows = trip ? tripRowsOf(trip, true) : 1
+    // Every alert the badge counts, newest first; else the last one, for the record.
+    const waiting = pendingTrips(b, now)
+    const shownAlerts = (waiting.length > 0 ? waiting : trip ? [trip] : []).slice(0, 3)
+    const moreAlerts = Math.max(0, waiting.length - shownAlerts.length)
+    const alertRows = shownAlerts.length === 0 ? 1 : shownAlerts.reduce((n, t, i) => n + tripRowsOf(t, true) + (i > 0 ? 1 : 0), 0) + (moreAlerts > 0 ? 1 : 0)
     const fresh = pendingCount(b, now)
     const limitRows = Math.max(1, windows.length)
     const tilesRows = 3 * tileRows.length + (tileRows.length - 1)
@@ -733,10 +686,10 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
     for (const id of ['burn', 'tasks']) if (!fits()) autoFold(id)
 
     const shownTasks = b.tasks.slice(-taskCount)
-    const overBudget = b.tasks.filter(k => (budgetUse(b, k) ?? 0) > 1).length
+    const overBudget = b.tasks.filter(k => k.budgetUsd > 0 && k.usd > k.budgetUsd).length
     const taskRight = (
       <Box key="tasks-right">
-        <Text color={MUTED}>{`${b.tasks.length} · ${narrow && !learning ? amount(spent) : totalText(spent, b.tokens)}`}</Text>
+        <Text color={MUTED}>{`${b.tasks.length} · ${money(spent)}`}</Text>
         {overBudget > 0 && !narrow ? <Text color={RED}>{` · ${overBudget} over`}</Text> : null}
         {b.tasks.length > shownTasks.length && !narrow ? <Text color={FAINT}>{` · latest ${shownTasks.length}`}</Text> : null}
       </Box>
@@ -792,8 +745,15 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
             </Text>
           </Box>,
           shut.has('alerts'),
-          trip !== undefined ? (
-            tripCard(trip, 'trip-latest', true, 0, true)
+          shownAlerts.length > 0 ? (
+            <Box key="alerts-body" flexDirection="column">
+              {shownAlerts.map((t, i) => (
+                <Box key={`alert-${i}`} flexDirection="column" marginTop={i > 0 ? 1 : 0}>
+                  {tripCard(t, i === 0 ? 'trip-latest' : `trip-new-${i}`, true, 0, true)}
+                </Box>
+              ))}
+              {moreAlerts > 0 ? <Text key="alerts-more" color={FAINT}>{cut(`+ ${moreAlerts} more on the Alerts tab`, C)}</Text> : null}
+            </Box>
           ) : (
             <Text key="no-alerts" color={FAINT}>{cut('The circuit breaker has not stopped anything yet.', C)}</Text>
           ),
@@ -836,7 +796,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
             ...shown.map(k => taskRow(k, true)),
             <Box key="tasks-total" marginTop={1} justifyContent="space-between">
               <Text color={FAINT}>total</Text>
-              <Text color={MUTED}>{cut(`${learning ? '' : `${amount(spent)}${ofWeek} · `}${compactTokens(b.tokens)} tokens · ${b.tasks.reduce((s, k) => s + k.calls, 0)} calls`, C - 7)}</Text>
+              <Text color={MUTED}>{cut(`${money(spent)} · ${compactTokens(b.tokens)} tokens · ${b.tasks.reduce((s, k) => s + k.calls, 0)} calls`, C - 7)}</Text>
             </Box>,
           ],
           1,
@@ -915,9 +875,9 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
         {panel(
           'agents-card',
           [
-            listHead('AGENTS', muted(rateW !== undefined ? 'tokens exact · share by reply' : 'tokens exact · cost by reply', C - 8)),
+            listHead('AGENTS', muted('tokens exact · cost by reply', C - 8)),
             <Text key="agents-cols" color={FAINT}>
-              {`  ${pad('AGENT', NAME)}${wide ? `${lpad('STEPS', 6)}${lpad('CALLS', 6)}` : ''}${lpad('TOKENS', 8)}${lpad(planMode ? 'WEEK' : 'COST', 8)}${lpad('CACHE', 7)}`}
+              {`  ${pad('AGENT', NAME)}${wide ? `${lpad('STEPS', 6)}${lpad('CALLS', 6)}` : ''}${lpad('TOKENS', 8)}${lpad('COST', 8)}${lpad('CACHE', 7)}`}
             </Text>,
             list.length === 0 ? <Text key="none" color={FAINT}>  No replies booked yet.</Text> : null,
             ...list.map(a => {
@@ -933,7 +893,7 @@ export function drawPane(kit: Kit, d: PaneData, act: PaneActions) {
                     <Text color={dot.color}>{`${dot.glyph} `}</Text>
                     <Text bold={a.id === MAIN}>{pad(a.name, NAME)}</Text>
                     <Text color={MUTED}>
-                      {`${wide ? `${lpad(String(a.steps), 6)}${lpad(String(a.calls), 6)}` : ''}${lpad(compactTokens(a.tokens), 8)}${lpad(amount(a.usd), 8)}`}
+                      {`${wide ? `${lpad(String(a.steps), 6)}${lpad(String(a.calls), 6)}` : ''}${lpad(compactTokens(a.tokens), 8)}${lpad(money(a.usd), 8)}`}
                     </Text>
                     <Text color={GREEN}>{lpad(hit(cacheHit(a.mix)), 7)}</Text>
                   </Box>

@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/PiyushSinha-9/tokenmunim/actions/workflows/ci.yml/badge.svg)](https://github.com/PiyushSinha-9/tokenmunim/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-E8B04B) ![Claude Code](https://img.shields.io/badge/Claude%20Code-2.1.287%2B-D97757)
 
-**Cost control for AI agents.** TokenMunim is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that gives every task its own budget, as a share of your plan or in dollars, keeps a live ledger of every step your agent takes, and trips a circuit breaker the moment the agent starts wasting your limits.
+**Cost control for AI agents.** TokenMunim is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that gives every task its own budget, keeps a live ledger of every step your agent takes, and trips a circuit breaker the moment the agent starts wasting money.
 
 <p align="center">
   <img src="docs/screenshots/claude-code-window.png" alt="The TokenMunim pane docked beside a Claude Code session, transcript blurred">
@@ -10,23 +10,19 @@
 
 ## Why
 
-Agents now run for hours with nobody watching. When one gets stuck it rarely crashes: it retries, rereads, rewrites, and keeps spending. On a Pro or Max plan that spending is your 5 hour and weekly limit, and the plan shows only the total: not which session or task used it, and nothing stops it while it happens.
+Agents now run for hours with nobody watching. When one gets stuck it rarely crashes: it retries, rereads, rewrites, and keeps spending. Your bill shows the total, not which task spent it, and nothing stops the spending while it happens.
 
 TokenMunim answers three questions while the agent works, not after:
 
-1. **Where is my limit going?** Each task's share of your week, and its tokens.
+1. **Where is the money going?** Cost and tokens for every task.
 2. **What did the agent actually do?** A complete, readable record of every call.
 3. **When should it stop?** Rules that block a call before it runs.
 
 ## What it does
 
-**Budgets as a share of your plan.** The agent starts a task with the `start_task` tool, and everything it does from then on is counted against that task: its share of your plan, tokens, calls and failures. A budget reads the way you think about your plan: `2% week`, `10% 5h`, or dollars, `$0.50`. An overnight run of twenty tasks becomes twenty lines on a ledger instead of one big number.
+**Budgets per task.** The agent starts a task with the `start_task` tool, and everything it does from then on is counted against that task: cost, tokens, calls and failures, with an optional budget. An overnight run of twenty tasks becomes twenty lines on a ledger instead of one big number.
 
-**Only its own usage counts.** A task's share is measured from the task's own work, so other sessions using the same plan at the same time never eat into its budget. A share is never more than what is left of its window.
-
-**It learns what 1% is worth.** Claude Code reports how much of each window your account has used, never how big the window is. So TokenMunim watches the weekly and 5 hour percent move while the session works, leaves out the stretches it did not watch, when another session could have been using the plan, and keeps the rate it learned for your next session. Tokens are weighed the way they are priced, because a cached token costs a tenth of a fresh one and an output token five times as much, so a raw token count would mislead. The 5 hour rate usually comes within minutes. The week moves slowly, so its rate can take a long session, and is remembered from then on. Until a rate is learned the dashboard shows tokens, and share budgets start counting once it is.
-
-**A live ledger.** Every tool call is recorded as it happens: what it was for, how long it took, and whether it worked. The full ledger is written to `.tokenmunim/ledger-<session>.md` in your project, one click away from the pane. The folder ignores itself in git.
+**A live ledger.** Every tool call is recorded as it happens: what it was for, how long it took, and whether it worked. The full ledger is written to `.tokenmunim/ledger-<session>.md` in your project, one click away in the pane's footer. The folder ignores itself in git.
 
 **A circuit breaker.** TokenMunim stops a call before it runs when:
 
@@ -34,8 +30,8 @@ TokenMunim answers three questions while the agent works, not after:
 |---|---|---|
 | Loop | The same action fails 3 times in a row | Stop retrying, read the error, change the approach |
 | Burn | Spend over the last two minutes passes the rate limit | Pause and work leaner |
-| Budget | A task uses its budget | Leave this task and move to the next one |
-| Session | The session uses its budget | Stop and report |
+| Budget | A task spends more than its budget | Leave this task and move to the next one |
+| Session | The session spends more than its budget | Stop and report |
 
 A trip blocks one call and says why, so the agent can recover. It never ends the session, and it never blocks the tools an agent needs to get itself unstuck.
 
@@ -51,15 +47,14 @@ A dashboard that docks beside the transcript.
 
 | Tab | What it shows |
 |---|---|
-| **Overview** | This session's share of the week and of the 5 hour window, plan limits and runway, tokens per minute, calls stopped, the burn chart, the token mix, tasks, recent activity and alerts |
-| **Tasks** | Every task with its share of the week, tokens, budget bar and calls. `›` shows that task's calls |
+| **Overview** | Plan limits and runway, spend, cost and tokens per minute, calls stopped, the burn chart, the token mix, tasks, recent activity and alerts |
+| **Tasks** | Every task with its spend, tokens, budget bar and calls. `›` shows that task's calls |
 | **Activity** | Every call, newest first, or only one task's after you drill in. `›` opens a call's details |
 | **Alerts** | Everything the circuit breaker stopped, and what was done about it |
 | **Agents** | The main agent and each subagent, with their model, steps, tokens, cost and cache hit rate |
 
-* **Your share, on the limit bars.** Each limit bar marks this session's slice in white, right where it came out of what was left.
-* **Alerts wait at the end.** The Alerts section stays folded behind a red `● 1 new` badge until you open it, counting each halted task once.
-* **Act on an alert from the pane.** The alert has buttons: `+0.5% budget` gives a halted task more room, `Allow once` lets the next call through, `Skip task` moves the agent on. Each choice is recorded on the alert.
+* **Alerts wait at the end.** The Alerts section stays folded behind a red `● 2 new` badge until you open it, then lists every alert the badge counts, each halted task once.
+* **Act on an alert from the pane.** The alert has buttons: `+$0.50 budget` gives a halted task more room, `Allow once` lets the next call through, `Skip task` moves the agent on. Each choice is recorded on the alert.
 * **Fold any section** by clicking its title, and click again to open it. A section you open stays open: when room runs short the pane folds the others, never yours. From the keyboard: `/munim fold activity`, `/munim unfold burn`.
 * **Fits any width.** Columns drop out in a fixed order as the pane narrows, tabs shorten, and charts stretch or shrink, so nothing wraps or spills.
 * **Never floods.** Every list sits in a fixed frame. The overview fits itself to the pane's height, and older rows live in the ledger file.
@@ -86,7 +81,7 @@ TokenMunim protects every session from the start, in the background, and shows n
 
 Ask for tasks in your prompt:
 
-> Migrate all twelve services to the new config. Start a task per service with 1% of my week each.
+> Migrate all twelve services to the new config. Start a task per service with a $0.50 budget.
 
 | Command | What it does |
 |---|---|
@@ -101,7 +96,7 @@ Ask for tasks in your prompt:
 | `/munim end` | Ends the current task |
 | `/munim reset` | Clears this session's ledger |
 
-Scripts and agents that can't see the tool can start a task with a shell line, `munim:task <name> <budget>` such as `munim:task review 2% week`, and end it with `munim:end`. TokenMunim answers these itself; the shell never runs them.
+Scripts and agents that can't see the tool can start a task with a shell line, `munim:task <name> <budget>`, and end it with `munim:end`. TokenMunim answers these itself; the shell never runs them.
 
 ## Settings
 
@@ -109,13 +104,11 @@ Change them in `/plugin`, under TokenMunim's configuration.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Budget per task | 1% of the week | A task that uses this much is halted. A share like `10% 5h`, or dollars like `$1` |
-| Session budget | 20% of the week | Every call is blocked once this session has used this much of the week, counting only its own usage |
+| Budget per task | $1 | A task that spends this much is halted |
+| Session budget | $20 | Every call is blocked once the session spends this much |
 | Loop limit | 3 | Identical failures before a retry is blocked |
 | Burn limit | $2 a minute | Measured over two minutes; pauses the agent once |
 | Open the dashboard when a session starts | Off | Turn it on to see the dashboard without running `/munim` |
-
-On an account without plan limits, such as an API key, a share budget counts as dollars instead: $1 a task and $20 a session, unless you set dollars yourself.
 
 ## What it costs
 
@@ -135,6 +128,7 @@ TokenMunim hooks five events: every tool call (check, run, record), every model 
 
 ## Future plans
 
+* **Budgets as a share of your plan.** On a Pro or Max plan the 5 hour and weekly limits run out, not dollars, so a budget like `2% of my week` is the natural one. Claude Code reports how much of each window is used, rounded, but not how big a window is, so a share can't be measured precisely yet. [docs/DESIGN.md](docs/DESIGN.md) has what was tried.
 * **Smarter loop detection.** Catch thrashing (many different edits while the same test keeps failing) and no progress (many calls with no file or test changing), not only exact repeats.
 * **Alerts for overnight runs.** A desktop notification or a Slack message when a circuit trips, so an unattended run can wake you.
 

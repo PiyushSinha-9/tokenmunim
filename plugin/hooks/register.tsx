@@ -1,37 +1,32 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { SessionSummary, Tab, Task, View } from '../types'
+import type { SessionSummary, Tab, View } from '../types'
 import {
   addTrip,
   allowOnce,
   ledgerMarkdown,
   bookCost,
   bookTokens,
-  budgetLabel,
   check,
   endTask,
   emptyBook,
   fingerprint,
   haltIfOver,
   haltedNamed,
-  learnedRates,
   limitsFrom,
   MAIN,
+  money,
   nameAgents,
   noteAgentCall,
   normalize,
   startTask,
-  parseBudget,
   parseMarker,
   raiseBudget,
   record,
-  resolveBudget,
-  seedPrior,
   setLimits,
   skipTask,
   statement,
-  stepLabel,
   summarize,
   summary,
   toolLabel,
@@ -44,18 +39,11 @@ const OWN = 'mcp__tokenmunim__'
 // Tools the agent needs to get itself out of a halt are never blocked.
 const EXEMPT = new Set(['ToolSearch'])
 const HISTORY_KEY = 'history'
-// What 1% of each plan window is worth, as earlier sessions learned it.
-const RATES_KEY = 'rates'
 const TABS: readonly Tab[] = ['overview', 'tasks', 'activity', 'alerts', 'agents']
 const SECTIONS: readonly string[] = ['burn', 'mix', 'tasks', 'activity', 'alerts']
 const book = atom({ plugin: 'tokenmunim', key: 'book' } as const, emptyBook())
 const view = atom({ plugin: 'tokenmunim', key: 'view' } as const, DEFAULT_VIEW)
 const bar = atom({ plugin: 'tokenmunim', key: 'bar' } as const, { shown: false, open: false })
-
-const openTask = (b: unknown): Task | undefined => {
-  const cur = normalize(b as never)
-  return cur.tasks.find(k => k.id === cur.active)
-}
 
 const fileStamp = (ms: number) => {
   const d = new Date(ms)
@@ -173,9 +161,8 @@ async function decide($: EngineInterface, kind: 'raise' | 'allow' | 'skip', task
   const b = normalize(await read($, book))
   const name = b.tasks.find(k => k.id === taskId)?.name ?? 'the task'
   if (kind === 'raise' && taskId !== undefined && by !== undefined) {
-    const task = b.tasks.find(k => k.id === taskId)
     await update($, book, cur => raiseBudget(normalize(cur), taskId, by))
-    $.ui.toast(`TokenMunim: ${name} gets ${task ? stepLabel(task, by) : by} more budget`)
+    $.ui.toast(`TokenMunim: ${name} gets ${money(by)} more budget`)
   } else if (kind === 'allow') {
     await update($, book, cur => allowOnce(normalize(cur)))
     $.ui.toast('TokenMunim: the next call goes through')
@@ -195,13 +182,12 @@ export const register: Register = (on, options) => {
     await $.tool.register({
       name: 'start_task',
       description:
-        'Start a task: TokenMunim tracks its share of the plan, tokens, calls and failures separately from everything else, with an optional budget. Call it when you begin each distinct piece of work in a batch; it ends the task before it. If TokenMunim halts a task, start the next one to continue.',
+        'Start a task: TokenMunim tracks its cost, tokens, calls and failures separately from everything else, with an optional budget. Call it when you begin each distinct piece of work in a batch; it ends the task before it. If TokenMunim halts a task, start the next one to continue.',
       inputSchema: {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Short name of the task, like "strategy 3" or "migrate billing service".' },
-          budget: { type: 'string', description: 'Optional budget: a share of the plan like "2% week" or "10% 5h", or dollars like "$0.50". Left out, the default applies.' },
-          budget_usd: { type: 'number', description: 'Optional budget in dollars, the same as a budget of "$0.50".' },
+          budget_usd: { type: 'number', description: 'Optional budget in USD for this task.' },
         },
         required: ['name'],
       },
@@ -216,12 +202,6 @@ export const register: Register = (on, options) => {
       argumentHint: 'open | close | off | statement | ledger | tab <name> | fold <section> | unfold <section> | task <name> | end | reset',
     })
     await locate($)
-    try {
-      const saved = await $.store.get(RATES_KEY)
-      if (saved !== undefined) await update($, book, b => seedPrior(normalize(b), saved))
-    } catch {
-      // Without a saved rate, this session learns its own.
-    }
     // A status line left by an earlier load is stale; the alarm starts quiet.
     $.ui.status(undefined)
     // Nothing shows until the person asks for it, unless they set it to open.
@@ -231,21 +211,17 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: 'mcp__tokenmunim__start_task' }, async ($, e) => {
     const name = typeof e.name === 'string' && e.name.trim() !== '' ? e.name.trim() : 'task'
-    const asked = parseBudget(e.budget) ?? parseBudget(e.budget_usd)
+    const budget = typeof e.budget_usd === 'number' && e.budget_usd > 0 ? e.budget_usd : limits.taskBudgetUsd
     const now = await $.clock.now()
     const usd = await costNow($)
     const halted = haltedNamed(normalize(await read($, book)), name)
     if (halted !== undefined) {
       return { result: `Task "${halted.name}" was halted (${halted.haltReason ?? 'over budget'}) and stays halted. Tell the user, then start a different task or stop.` }
     }
-    const after = await update($, book, b => {
-      const charged = bookCost(normalize(b), usd, now, e.agentId)
-      return startTask(charged, name, resolveBudget(charged, asked ?? limits.taskBudget, limits.taskFallbackUsd), now)[0]
-    })
-    const made = openTask(after)
+    await update($, book, b => startTask(bookCost(normalize(b), usd, now, e.agentId), name, budget, now)[0])
     alarm($, undefined)
     await writeLedger($)
-    return { result: `Task "${name}" started with a budget of ${made ? budgetLabel(made) : 'the default'}. Its share of the plan, tokens and calls are now tracked on their own.` }
+    return { result: `Task "${name}" started with a budget of ${money(budget)}. Its cost, tokens and calls are now tracked on their own.` }
   })
 
   on('tool.call', { tool: 'mcp__tokenmunim__end_task' }, async ($, e) => {
@@ -268,14 +244,14 @@ export const register: Register = (on, options) => {
 
     const marker = tool === 'Bash' && typeof input.command === 'string' ? parseMarker(input.command) : null
     if (marker !== null) {
-      const after = await update($, book, b => {
+      const said =
+        marker.verb === 'end' ? 'Task ended.' : `Task "${marker.name}" started with a budget of ${money(marker.budgetUsd ?? limits.taskBudgetUsd)}.`
+      await update($, book, b => {
         const charged = bookCost(normalize(b), usd, startedAtMs, agentId)
         return marker.verb === 'end'
           ? endTask(charged)
-          : startTask(charged, marker.name, resolveBudget(charged, marker.budget ?? limits.taskBudget, limits.taskFallbackUsd), startedAtMs)[0]
+          : startTask(charged, marker.name, marker.budgetUsd ?? limits.taskBudgetUsd, startedAtMs)[0]
       })
-      const made = openTask(after)
-      const said = marker.verb === 'end' ? 'Task ended.' : `Task "${marker.name}" started with a budget of ${made ? budgetLabel(made) : 'the default'}.`
       await writeLedger($)
       return { result: { stdout: said, stderr: '', interrupted: false }, text: said } as never
     }
@@ -338,11 +314,6 @@ export const register: Register = (on, options) => {
     const saved = (await $.store.get(HISTORY_KEY)) as SessionSummary[] | undefined
     const others = (saved ?? []).filter(s => s.startedAt !== usage.startedAt)
     await $.store.set(HISTORY_KEY, [...others, summary(normalize(b), usage.startedAt)].slice(-50))
-    const learned = learnedRates(normalize(b))
-    if (Object.keys(learned).length > 0) {
-      const kept = ((await $.store.get(RATES_KEY)) ?? {}) as Record<string, unknown>
-      await $.store.set(RATES_KEY, { ...kept, ...learned })
-    }
     await writeLedger($)
     return next(e)
   })
@@ -385,14 +356,10 @@ export const register: Register = (on, options) => {
     if (verb === 'task') {
       const name = rest.join(' ').trim() || 'task'
       const usd = await costNow($)
-      const after = await update($, book, b => {
-        const charged = bookCost(normalize(b), usd, now)
-        return startTask(charged, name, resolveBudget(charged, limits.taskBudget, limits.taskFallbackUsd), now)[0]
-      })
-      const made = openTask(after)
+      await update($, book, b => startTask(bookCost(normalize(b), usd, now), name, limits.taskBudgetUsd, now)[0])
       alarm($, undefined)
       await writeLedger($)
-      return { text: `Task "${name}" started with a budget of ${made ? budgetLabel(made) : 'the default'}.` }
+      return { text: `Task "${name}" started with a budget of ${money(limits.taskBudgetUsd)}.` }
     }
     if (verb === 'end') {
       await update($, book, b => endTask(normalize(b)))
