@@ -5,7 +5,7 @@
 **Cost control for AI agents.** TokenMunim is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that gives every task its own budget, keeps a live ledger of every step your agent takes, and trips a circuit breaker the moment the agent starts wasting money.
 
 <p align="center">
-  <img src="docs/screenshots/claude-code-window.png" alt="The TokenMunim pane docked beside a Claude Code session, transcript blurred">
+  <img src="docs/screenshots/dashboard-window.png" alt="The TokenMunim dashboard docked beside a Claude Code session after a research batch, transcript blurred">
 </p>
 
 ## Why
@@ -60,8 +60,8 @@ A dashboard that docks beside the transcript.
 * **Never floods.** Every list sits in a fixed frame. The overview fits itself to the pane's height, and older rows live in the ledger file.
 
 <p align="center">
-  <img src="docs/screenshots/limits-and-burn.png" width="420" alt="Plan limits, the KPI tiles and the burn chart">
-  <img src="docs/screenshots/alerts-and-tasks.png" width="420" alt="An alert from the circuit breaker, and the tasks">
+  <img src="docs/screenshots/dashboard-top.png" width="420" alt="Plan limits, spend, cost and tokens per minute, and the burn chart over its limit">
+  <img src="docs/screenshots/dashboard-tasks.png" width="420" alt="The token mix and the tasks: strategy 6 halted at 1.2 times its budget, with three new alerts">
 </p>
 
 ## Install
